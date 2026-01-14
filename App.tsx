@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -12,24 +12,26 @@ import { generateLore, generateAdvisorTip } from './services/geminiService';
 // Initial World Setup
 const INITIAL_ENTITIES: Entity[] = [
   // Player Base
-  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep' },
-  { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John' },
+  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0 },
+  { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0 },
   
   // Resources
-  { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine' },
-  { id: 'tr-1', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -8, y: 0, z: -8 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Ancient Oak' },
-  { id: 'tr-2', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -10, y: 0, z: -6 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Pine Tree' },
-  { id: 'tr-3', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -12, y: 0, z: -9 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Birch' },
+  { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine', lastAttackTime: 0 },
+  { id: 'tr-1', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -8, y: 0, z: -8 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Ancient Oak', lastAttackTime: 0 },
+  { id: 'tr-2', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -10, y: 0, z: -6 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Pine Tree', lastAttackTime: 0 },
+  { id: 'tr-3', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -12, y: 0, z: -9 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Birch', lastAttackTime: 0 },
   
   // More resources
-  { id: 'tr-4', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -15, y: 0, z: 10 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest' },
-  { id: 'tr-5', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: 15, y: 0, z: 12 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest' },
+  { id: 'tr-4', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -15, y: 0, z: 10 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0 },
+  { id: 'tr-5', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: 15, y: 0, z: 12 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0 },
 ];
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>({
     resources: { gold: 200, wood: 100, food: 1, maxFood: 10 },
     entities: INITIAL_ENTITIES,
+    projectiles: [],
+    floatingTexts: [],
     selection: [],
     messages: [{ id: 'init', text: 'Welcome to Realm of Aethelgard.', type: 'info', timestamp: Date.now() }],
     placementMode: { active: false, type: null, cost: { gold: 0, wood: 0 } },
@@ -47,23 +49,29 @@ export default function App() {
     }));
   };
 
+  const spawnFloatingText = (text: string, pos: {x:number, y:number, z:number}, color: string) => {
+      setGameState(prev => ({
+          ...prev,
+          floatingTexts: [...prev.floatingTexts, { id: uuidv4(), text, position: pos, color, life: 1.0 }]
+      }));
+  };
+
   // --- Actions ---
 
-  const handleSelectEntity = (id: string, multi: boolean) => {
-    if (gameState.placementMode.active) return; // Don't select while placing
+  const handleSelectEntity = (ids: string[], multi: boolean) => {
+    if (gameState.placementMode.active) return; 
 
     setGameState(prev => {
-        if (!id) return { ...prev, entities: prev.entities.map(e => ({...e, selected: false})), selection: [] };
-        const entity = prev.entities.find(e => e.id === id);
-        if (!entity) return prev;
-        
-        // MVP: Single select
+        let newSelection = multi ? [...prev.selection, ...ids] : ids;
+        // Unique
+        newSelection = [...new Set(newSelection)];
+
         return {
             ...prev,
-            selection: [id],
+            selection: newSelection,
             entities: prev.entities.map(e => ({
                 ...e,
-                selected: e.id === id
+                selected: newSelection.includes(e.id)
             }))
         };
     });
@@ -116,7 +124,7 @@ export default function App() {
                 return { ...e, state: 'gathering', targetId: target.id, targetPos: null, lastResourceId: target.id };
             }
             actionTriggered = true;
-            return { ...e, state: 'moving', targetPos: target.position, targetId: null };
+            return { ...e, state: 'moving', targetPos: target.position, targetId: null }; // Follow
           }
           return e;
       });
@@ -135,19 +143,22 @@ export default function App() {
 
       if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
           // Find a builder (Peasant)
-          const peasantId = gameState.selection[0];
-          const peasant = gameState.entities.find(e => e.id === peasantId);
+          const peasantId = gameState.selection.find(id => {
+              const ent = gameState.entities.find(e => e.id === id);
+              return ent && ent.subType === UnitType.PEASANT;
+          });
           
-          if (peasant && peasant.subType === UnitType.PEASANT) {
+          if (peasantId) {
               const newBuilding: Entity = {
                 id: uuidv4(),
                 type: EntityType.BUILDING,
                 subType: type,
                 faction: Faction.PLAYER,
                 position: { x: pos.x, y: 0, z: pos.z },
-                hp: 1, // Start low HP and build up? MVP: Full HP for now
-                maxHp: 1000,
-                name: type
+                hp: 10, // Start low HP and build up? MVP: Instant
+                maxHp: UNIT_STATS[type].hp || 500,
+                name: type,
+                lastAttackTime: 0
               };
               
               setGameState(prev => ({
@@ -157,7 +168,7 @@ export default function App() {
                       gold: prev.resources.gold - cost.gold,
                       wood: prev.resources.wood - cost.wood
                   },
-                  entities: [...prev.entities, { ...newBuilding, hp: newBuilding.maxHp }], // Instant build for MVP
+                  entities: [...prev.entities, { ...newBuilding, hp: newBuilding.maxHp }], 
                   placementMode: { active: false, type: null, cost: {gold:0, wood:0} }
               }));
               addMessage(`Construction of ${type} complete!`);
@@ -190,7 +201,7 @@ export default function App() {
 
            setTimeout(() => {
                setGameState(prev => {
-                   const stillBuilding = prev.entities.find(e => e.id === buildingId); // Check if building still exists
+                   const stillBuilding = prev.entities.find(e => e.id === buildingId); 
                    if (!stillBuilding) return prev;
 
                    const newUnit: Entity = {
@@ -206,7 +217,8 @@ export default function App() {
                        hp: UNIT_STATS[type].hp,
                        maxHp: UNIT_STATS[type].hp,
                        state: 'idle',
-                       name: `${type} Recr.`
+                       name: `${type}`,
+                       lastAttackTime: 0
                    };
                    return {
                        ...prev,
@@ -247,9 +259,12 @@ export default function App() {
         setGameState(prev => {
             if (prev.gameOver) return prev;
 
+            const now = Date.now();
             let newEntities = [...prev.entities];
             let newResources = { ...prev.resources };
             let messages = [...prev.messages];
+            let newProjectiles = [...prev.projectiles];
+            let newFloatingTexts = [...prev.floatingTexts];
             let hasChanges = false;
             let currentWave = prev.wave;
 
@@ -258,42 +273,105 @@ export default function App() {
             if (waveTimerRef.current >= nextWaveTimeRef.current) {
                 waveTimerRef.current = 0;
                 currentWave++;
-                const spawnCount = Math.floor(currentWave / 2) + 1;
+                const spawnCount = Math.floor(currentWave * 1.5) + 1;
                 addMessage(`Wave ${currentWave} approaching!`, 'alert');
                 
                 for(let i=0; i<spawnCount; i++) {
                     const angle = Math.random() * Math.PI * 2;
-                    const r = 40;
+                    const r = 50;
                     const spawnPos = { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r };
                     newEntities.push({
                          id: uuidv4(),
                          type: EntityType.UNIT,
-                         subType: UnitType.FOOTMAN,
+                         subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, // Mix units later
                          faction: Faction.ENEMY,
                          position: spawnPos,
                          hp: 420,
                          maxHp: 420,
                          state: 'idle',
-                         name: 'Invader'
+                         name: 'Invader',
+                         lastAttackTime: 0
                     });
                 }
                 hasChanges = true;
             }
 
-            // 2. Entity AI & State Update
+            // 2. Projectile Physics
+            newProjectiles = newProjectiles.map(p => {
+                const target = prev.entities.find(e => e.id === p.targetId);
+                if (!target) return { ...p, progress: 2 }; // Mark for deletion
+
+                const speed = 0.05; // Projectile speed
+                const nextProgress = p.progress + speed;
+                
+                if (nextProgress >= 1) {
+                   // HIT
+                   return { ...p, progress: 1 }; // Will be cleaned up
+                }
+                return { ...p, progress: nextProgress };
+            });
+
+            // Projectile Damage & Cleanup
+            const hitProjectiles = newProjectiles.filter(p => p.progress >= 1);
+            newProjectiles = newProjectiles.filter(p => p.progress < 1);
+            if (hitProjectiles.length > 0 || newProjectiles.length !== prev.projectiles.length) hasChanges = true;
+
             const damageMap: Record<string, number> = {};
-            const resourceMap: Record<string, number> = {}; // Tracks resource HP depletion
+            hitProjectiles.forEach(p => {
+                damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
+                // Add floating text
+                const t = prev.entities.find(e => e.id === p.targetId);
+                if (t) {
+                    newFloatingTexts.push({ id: uuidv4(), text: `-${p.damage}`, position: { ...t.position }, color: '#ef4444', life: 1 });
+                }
+            });
+
+            // 3. Entity Logic
+            const resourceMap: Record<string, number> = {}; 
 
             newEntities = newEntities.map(entity => {
                 const CARRY_CAPACITY = 10;
-                const TICK_SPEED = 0.033; // ~30FPS
+                const TICK_SPEED = 0.033;
+                let pos = { ...entity.position };
+                const stats = UNIT_STATS[entity.subType as UnitType] || UNIT_STATS[UnitType.PEASANT];
 
-                // --- Enemy AI ---
+                // Collision Avoidance (Separation)
+                if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking')) {
+                    const separationRadius = 1.0;
+                    let moveX = 0, moveZ = 0;
+                    let count = 0;
+                    
+                    prev.entities.forEach(other => {
+                        if (entity.id !== other.id && other.type === EntityType.UNIT) {
+                            const dx = entity.position.x - other.position.x;
+                            const dz = entity.position.z - other.position.z;
+                            const dSq = dx*dx + dz*dz;
+                            if (dSq < separationRadius * separationRadius && dSq > 0.001) {
+                                const d = Math.sqrt(dSq);
+                                moveX += (dx / d) / d; // Weight by inverse distance
+                                moveZ += (dz / d) / d;
+                                count++;
+                            }
+                        }
+                    });
+
+                    if (count > 0) {
+                        const pushStrength = 0.05;
+                        pos.x += moveX * pushStrength;
+                        pos.z += moveZ * pushStrength;
+                        hasChanges = true;
+                    }
+                }
+
+                // AI & State Logic
+                
+                // --- Enemy Aggro ---
                 if (entity.faction === Faction.ENEMY && entity.type === EntityType.UNIT) {
-                    // (Simple Aggro Logic)
                     if (entity.state === 'idle' || (entity.state === 'moving' && !entity.targetId)) {
                         let closest = null;
                         let minDst = Infinity;
+                        
+                        // Prioritize buildings then units
                         for (const other of prev.entities) {
                             if (other.faction === Faction.PLAYER) {
                                 const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
@@ -303,100 +381,108 @@ export default function App() {
                                 }
                             }
                         }
-                        if (closest && minDst < 20) {
+                        
+                        if (closest && minDst < 30) { // Aggro range
                              hasChanges = true;
-                             return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null };
+                             return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null, position: pos };
                         } else if (!entity.targetPos && !closest) {
                              hasChanges = true;
-                             return { ...entity, state: 'moving', targetPos: {x:0,y:0,z:0} }; // March to center if no target
+                             return { ...entity, state: 'moving', targetPos: {x:0,y:0,z:0}, position: pos }; // March to center
                         }
                     }
                 }
+                
+                // --- Tower Logic ---
+                if (entity.subType === BuildingType.TOWER && entity.faction === Faction.PLAYER) {
+                    // Look for enemies
+                    if (now - entity.lastAttackTime > stats.attackSpeed) {
+                         const range = stats.range || 15;
+                         const target = prev.entities.find(e => {
+                             if (e.faction !== Faction.ENEMY) return false;
+                             const d = Math.sqrt(Math.pow(entity.position.x - e.position.x, 2) + Math.pow(entity.position.z - e.position.z, 2));
+                             return d <= range;
+                         });
+                         
+                         if (target) {
+                             newProjectiles.push({
+                                 id: uuidv4(),
+                                 startPos: { x: entity.position.x, y: 4, z: entity.position.z },
+                                 targetId: target.id,
+                                 speed: 0.1,
+                                 progress: 0,
+                                 damage: stats.damage
+                             });
+                             hasChanges = true;
+                             return { ...entity, lastAttackTime: now };
+                         }
+                    }
+                }
 
-                // --- Movement Generic ---
+                // --- Movement ---
                 if (entity.state === 'moving' && entity.targetPos) {
-                    const dx = entity.targetPos.x - entity.position.x;
-                    const dz = entity.targetPos.z - entity.position.z;
+                    const dx = entity.targetPos.x - pos.x;
+                    const dz = entity.targetPos.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
-                    const speed = (UNIT_STATS[entity.subType as UnitType]?.speed || 3) * TICK_SPEED;
+                    const speed = (stats.speed || 3) * TICK_SPEED;
 
                     if (dist < 0.5) {
                         hasChanges = true;
-                        return { ...entity, state: 'idle', targetPos: null };
+                        return { ...entity, state: 'idle', targetPos: null, position: pos };
                     } else {
                         hasChanges = true;
-                        return {
-                            ...entity,
-                            position: {
-                                x: entity.position.x + (dx/dist) * speed,
-                                y: 0,
-                                z: entity.position.z + (dz/dist) * speed
-                            }
-                        };
+                        pos.x += (dx/dist) * speed;
+                        pos.z += (dz/dist) * speed;
+                        return { ...entity, position: pos };
                     }
                 }
 
-                // --- Gathering Logic (The Work Loop) ---
+                // --- Gathering ---
                 if (entity.state === 'gathering') {
-                    // Check Capacity First
                     if ((entity.carryAmount || 0) >= CARRY_CAPACITY) {
-                        // Find Base
                         const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
                         if (townHall) {
                             hasChanges = true;
-                            return { ...entity, state: 'returning', targetId: townHall.id };
+                            return { ...entity, state: 'returning', targetId: townHall.id, position: pos };
                         }
-                        hasChanges = true;
-                        return { ...entity, state: 'idle' }; // No base to return to
+                        return { ...entity, state: 'idle', position: pos };
                     }
 
-                    // Check Resource Target
                     const target = prev.entities.find(t => t.id === entity.targetId);
-                    
-                    // If Resource Dead/Gone
                     if (!target || target.hp <= 0) {
-                        // If carrying anything, return it. Else idle.
-                        if ((entity.carryAmount || 0) > 0) {
+                         if ((entity.carryAmount || 0) > 0) {
                              const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
                              if (townHall) {
                                  hasChanges = true;
-                                 return { ...entity, state: 'returning', targetId: townHall.id, lastResourceId: null };
+                                 return { ...entity, state: 'returning', targetId: townHall.id, lastResourceId: null, position: pos };
                              }
                         }
-                        hasChanges = true;
-                        return { ...entity, state: 'idle' };
+                        return { ...entity, state: 'idle', position: pos };
                     }
 
-                    const dx = target.position.x - entity.position.x;
-                    const dz = target.position.z - entity.position.z;
+                    const dx = target.position.x - pos.x;
+                    const dz = target.position.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     
                     if (dist > 2.5) {
-                        // Move to Resource
-                         const speed = (UNIT_STATS[entity.subType as UnitType]?.speed || 2.5) * TICK_SPEED;
+                         const speed = (stats.speed || 2.5) * TICK_SPEED;
                          hasChanges = true;
-                         return {
-                            ...entity,
-                            position: {
-                                x: entity.position.x + (dx/dist) * speed,
-                                y: 0,
-                                z: entity.position.z + (dz/dist) * speed
-                            }
-                        };
+                         pos.x += (dx/dist) * speed;
+                         pos.z += (dz/dist) * speed;
+                         return { ...entity, position: pos };
                     } else {
-                        // Work (Harvest)
-                        if (Math.random() > 0.85) { 
+                        // Work
+                        if (Math.random() > 0.90) { 
                             const gatherAmount = 1;
                             resourceMap[target.id] = (resourceMap[target.id] || 0) + gatherAmount;
                             hasChanges = true;
-                            
                             return { 
                                 ...entity, 
+                                position: pos,
                                 carryAmount: (entity.carryAmount || 0) + gatherAmount,
                                 carryType: target.subType as ResourceType
                             };
                         }
-                        return entity;
+                        return { ...entity, position: pos };
                     }
                 }
 
@@ -405,41 +491,40 @@ export default function App() {
                      const townHall = prev.entities.find(t => t.id === entity.targetId);
                      if (!townHall) {
                          hasChanges = true;
-                         return { ...entity, state: 'idle' };
+                         return { ...entity, state: 'idle', position: pos };
                      }
 
-                     const dx = townHall.position.x - entity.position.x;
-                     const dz = townHall.position.z - entity.position.z;
+                     const dx = townHall.position.x - pos.x;
+                     const dz = townHall.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
 
-                     if (dist > 4.0) { // Town hall is big, stop earlier
-                         const speed = (UNIT_STATS[entity.subType as UnitType]?.speed || 2.5) * TICK_SPEED;
+                     if (dist > 4.0) { 
+                         const speed = (stats.speed || 2.5) * TICK_SPEED;
                          hasChanges = true;
-                         return {
-                             ...entity,
-                             position: {
-                                 x: entity.position.x + (dx/dist) * speed,
-                                 y: 0,
-                                 z: entity.position.z + (dz/dist) * speed
-                             }
-                         };
+                         pos.x += (dx/dist) * speed;
+                         pos.z += (dz/dist) * speed;
+                         return { ...entity, position: pos };
                      } else {
                          // Deposit
                          if (entity.carryType === ResourceType.GOLD) newResources.gold += (entity.carryAmount || 0);
                          if (entity.carryType === ResourceType.WOOD) newResources.wood += (entity.carryAmount || 0);
+                         
+                         // Visual pop
+                         newFloatingTexts.push({ id: uuidv4(), text: `+${entity.carryAmount}`, position: {x: pos.x, y: 3, z: pos.z}, color: '#fbbf24', life: 1 });
+
                          hasChanges = true;
 
-                         // Return to work?
                          if (entity.lastResourceId) {
                              return { 
                                  ...entity, 
+                                 position: pos,
                                  state: 'gathering', 
                                  targetId: entity.lastResourceId, 
                                  carryAmount: 0, 
                                  carryType: undefined 
                              };
                          }
-                         return { ...entity, state: 'idle', carryAmount: 0, carryType: undefined };
+                         return { ...entity, state: 'idle', carryAmount: 0, carryType: undefined, position: pos };
                      }
                 }
                 
@@ -448,39 +533,53 @@ export default function App() {
                      const target = prev.entities.find(t => t.id === entity.targetId);
                      if (!target || target.hp <= 0) {
                          hasChanges = true;
-                         return { ...entity, state: 'idle' };
+                         return { ...entity, state: 'idle', position: pos };
                      }
                      
-                     const dx = target.position.x - entity.position.x;
-                     const dz = target.position.z - entity.position.z;
+                     const dx = target.position.x - pos.x;
+                     const dz = target.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
-                     const range = UNIT_STATS[entity.subType as UnitType]?.range || 2;
+                     const range = stats.range || 2;
 
                      if (dist > range) {
-                         const speed = (UNIT_STATS[entity.subType as UnitType]?.speed || 3) * TICK_SPEED;
+                         const speed = (stats.speed || 3) * TICK_SPEED;
                          hasChanges = true;
-                         return {
-                             ...entity,
-                             position: {
-                                 x: entity.position.x + (dx/dist) * speed,
-                                 y: 0,
-                                 z: entity.position.z + (dz/dist) * speed
-                             }
-                         };
+                         pos.x += (dx/dist) * speed;
+                         pos.z += (dz/dist) * speed;
+                         return { ...entity, position: pos };
                      } else {
-                         if (Math.random() > 0.95) { 
-                             const dmg = UNIT_STATS[entity.subType as UnitType]?.damage || 5;
-                             damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
+                         // Attack Cooldown
+                         if (now - entity.lastAttackTime > stats.attackSpeed) {
                              hasChanges = true;
+                             const dmg = stats.damage || 5;
+
+                             // Ranged?
+                             if (range > 3) {
+                                 // Fire Projectile
+                                 newProjectiles.push({
+                                     id: uuidv4(),
+                                     startPos: { x: pos.x, y: 1.5, z: pos.z },
+                                     targetId: target.id,
+                                     speed: 0.1,
+                                     progress: 0,
+                                     damage: dmg
+                                 });
+                             } else {
+                                 // Melee Immediate
+                                 damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
+                                 newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
+                             }
+
+                             return { ...entity, lastAttackTime: now, position: pos };
                          }
-                         return entity;
+                         return { ...entity, position: pos };
                      }
                 }
 
-                return entity;
+                return { ...entity, position: pos };
             });
 
-            // 3. Apply Damage & Resource Depletion
+            // 4. Apply Damages
             newEntities = newEntities.map(e => {
                 let newHp = e.hp;
                 if (damageMap[e.id]) newHp -= damageMap[e.id];
@@ -488,10 +587,10 @@ export default function App() {
                 return { ...e, hp: newHp };
             });
 
-            // 4. Cleanup Dead & Win/Loss Check
+            // 5. Cleanup Dead
             const survivingEntities = newEntities.filter(e => e.hp > 0);
             
-            // Check Player Town Hall
+            // Win/Loss
             const townHall = survivingEntities.find(e => e.subType === BuildingType.TOWN_HALL && e.faction === Faction.PLAYER);
             let gameOver = false;
             
@@ -502,12 +601,18 @@ export default function App() {
 
             if (survivingEntities.length !== prev.entities.length) hasChanges = true;
 
+            // Update Floating Text life
+            newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
+            if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
+
             const newSelection = prev.selection.filter(id => survivingEntities.find(e => e.id === id));
             
             return hasChanges ? { 
                 ...prev, 
                 entities: survivingEntities, 
                 resources: newResources, 
+                projectiles: newProjectiles,
+                floatingTexts: newFloatingTexts,
                 wave: currentWave,
                 gameOver,
                 messages,
@@ -525,6 +630,8 @@ export default function App() {
       <Canvas shadows camera={{ position: INITIAL_CAMERA_POS, fov: 50 }}>
         <GameScene 
             entities={gameState.entities} 
+            projectiles={gameState.projectiles}
+            floatingTexts={gameState.floatingTexts}
             placementMode={gameState.placementMode}
             onSelectEntity={handleSelectEntity}
             onRightClickGround={handleRightClickGround}

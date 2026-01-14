@@ -7,13 +7,15 @@ export enum EntityType {
 export enum UnitType {
   PEASANT = 'Peasant',
   FOOTMAN = 'Footman',
-  KNIGHT = 'Knight'
+  KNIGHT = 'Knight',
+  ARCHER = 'Archer'
 }
 
 export enum BuildingType {
   TOWN_HALL = 'Town Hall',
   BARRACKS = 'Barracks',
-  FARM = 'Farm'
+  FARM = 'Farm',
+  TOWER = 'Scout Tower'
 }
 
 export enum ResourceType {
@@ -45,11 +47,33 @@ export interface Entity {
   targetId?: string | null; // ID of entity being targeted (attack/gather)
   targetPos?: Position | null; // Movement destination
   state?: 'idle' | 'moving' | 'gathering' | 'attacking' | 'returning';
-  resourceAmount?: number; // For gold mines/trees
-  carryAmount?: number; // For peasants carrying resources
-  carryType?: ResourceType; // What resource is being carried
-  lastResourceId?: string; // To remember which node to go back to after depositing
-  name: string; // For flavor
+  
+  // Economy
+  resourceAmount?: number;
+  carryAmount?: number;
+  carryType?: ResourceType;
+  lastResourceId?: string;
+  
+  // Combat
+  lastAttackTime: number;
+  name: string;
+}
+
+export interface Projectile {
+  id: string;
+  startPos: Position;
+  targetId: string; // Homing arrows for MVP
+  speed: number;
+  progress: number; // 0 to 1
+  damage: number;
+}
+
+export interface FloatingText {
+  id: string;
+  text: string;
+  position: Position;
+  color: string;
+  life: number; // 0 to 1
 }
 
 export interface PlacementMode {
@@ -66,7 +90,9 @@ export interface GameState {
     maxFood: number;
   };
   entities: Entity[];
-  selection: string[]; // Array of selected Entity IDs
+  projectiles: Projectile[];
+  floatingTexts: FloatingText[];
+  selection: string[]; 
   messages: LogMessage[];
   placementMode: PlacementMode;
   gameOver: boolean;

@@ -10,7 +10,9 @@ import {
   Sparkles,
   ShieldAlert,
   Skull,
-  MousePointer2
+  MousePointer2,
+  Crosshair,
+  TowerControl
 } from 'lucide-react';
 import { GameState, Entity, UnitType, BuildingType, EntityType } from '../types';
 import { COSTS, UNIT_STATS } from '../constants';
@@ -28,9 +30,11 @@ const Portrait = ({ type }: { type: string }) => {
     [UnitType.PEASANT]: 'bg-yellow-200',
     [UnitType.FOOTMAN]: 'bg-blue-300',
     [UnitType.KNIGHT]: 'bg-indigo-400',
+    [UnitType.ARCHER]: 'bg-green-300',
     [BuildingType.TOWN_HALL]: 'bg-blue-800',
     [BuildingType.BARRACKS]: 'bg-red-800',
     [BuildingType.FARM]: 'bg-green-700',
+    [BuildingType.TOWER]: 'bg-stone-500',
   };
 
   return (
@@ -47,8 +51,10 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   onGetLore,
   onGetAdvisor
 }) => {
-  const selectedEntityId = gameState.selection[0];
-  const selectedEntity = gameState.entities.find(e => e.id === selectedEntityId);
+  // Logic for displaying selection
+  const selectedCount = gameState.selection.length;
+  const primarySelectionId = gameState.selection[0];
+  const selectedEntity = gameState.entities.find(e => e.id === primarySelectionId);
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between font-ui text-white">
@@ -104,7 +110,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
       <div className="absolute bottom-52 left-4 bg-black/50 p-2 rounded text-xs text-gray-300 pointer-events-none">
           <div className="flex items-center space-x-2">
               <MousePointer2 size={12} />
-              <span>Left Click: Select | Right Click: Move / Gather / Attack</span>
+              <span>Left Click: Select | Drag: Box Select | Right Click: Action</span>
           </div>
       </div>
 
@@ -117,7 +123,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
             {gameState.entities.map(e => (
                 <div 
                     key={e.id}
-                    className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2`}
+                    className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2 ${e.selected ? 'ring-2 ring-white z-10' : ''}`}
                     style={{
                         left: `${(e.position.x + 50) / 100 * 100}%`,
                         top: `${(e.position.z + 50) / 100 * 100}%`,
@@ -129,7 +135,18 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {/* Selection Info */}
         <div className="w-64 bg-stone-800 p-4 border-r-4 border-wood-800 flex flex-col items-center text-center">
-          {selectedEntity ? (
+          {selectedCount > 1 ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                  <div className="text-gold-400 font-fantasy text-xl mb-2">{selectedCount} Units Selected</div>
+                  <div className="grid grid-cols-4 gap-1">
+                      {gameState.selection.slice(0, 8).map(id => {
+                          const ent = gameState.entities.find(e => e.id === id);
+                          return ent ? <div key={id} className="w-8 h-8 rounded bg-blue-500 border border-white"></div> : null;
+                      })}
+                      {selectedCount > 8 && <div className="text-xs text-gray-400 flex items-center justify-center">...</div>}
+                  </div>
+              </div>
+          ) : selectedEntity ? (
             <>
               <div className="flex items-start w-full space-x-4 mb-2">
                 <Portrait type={selectedEntity.subType} />
@@ -145,12 +162,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               <div className="w-full h-[1px] bg-gray-600 my-2"></div>
               
               {/* Stats */}
-              {selectedEntity.type === EntityType.UNIT && (
-                <div className="w-full grid grid-cols-2 gap-2 text-xs text-gray-400">
-                    <div className="flex items-center"><Sword size={12} className="mr-1"/> {UNIT_STATS[selectedEntity.subType as UnitType]?.damage || 0} Dmg</div>
-                    <div className="flex items-center"><ShieldAlert size={12} className="mr-1"/> 0 Armor</div>
-                </div>
-              )}
+              <div className="w-full grid grid-cols-2 gap-2 text-xs text-gray-400">
+                   {selectedEntity.type === EntityType.UNIT || selectedEntity.subType === BuildingType.TOWER ? (
+                       <div className="flex items-center"><Sword size={12} className="mr-1"/> {UNIT_STATS[selectedEntity.subType as UnitType]?.damage || 0} Dmg</div>
+                   ) : null}
+                  <div className="flex items-center"><ShieldAlert size={12} className="mr-1"/> {Math.floor(selectedEntity.maxHp/100)} Armor</div>
+              </div>
 
               <button 
                 onClick={() => onGetLore(selectedEntity)}
@@ -186,6 +203,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     disabled={gameState.resources.gold < COSTS[UnitType.FOOTMAN].gold || gameState.resources.wood < COSTS[UnitType.FOOTMAN].wood}
                  />
                  <ActionButton 
+                    icon={<Crosshair />} 
+                    label="Train Archer" 
+                    cost={COSTS[UnitType.ARCHER]} 
+                    onClick={() => onTrainUnit(UnitType.ARCHER)} 
+                    disabled={gameState.resources.gold < COSTS[UnitType.ARCHER].gold || gameState.resources.wood < COSTS[UnitType.ARCHER].wood}
+                 />
+                 <ActionButton 
                     icon={<Sword />} 
                     label="Train Knight" 
                     cost={COSTS[UnitType.KNIGHT]} 
@@ -195,7 +219,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                 </>
             )}
             
-            {/* Generic Actions */}
+            {/* Peasant Build Menu */}
             {selectedEntity && selectedEntity.type === EntityType.UNIT && selectedEntity.subType === UnitType.PEASANT && (
                 <>
                  <ActionButton 
@@ -211,6 +235,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     cost={COSTS[BuildingType.FARM]} 
                     onClick={() => onBuild(BuildingType.FARM)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.FARM].gold}
+                 />
+                 <ActionButton 
+                    icon={<TowerControl />} 
+                    label="Build Tower" 
+                    cost={COSTS[BuildingType.TOWER]} 
+                    onClick={() => onBuild(BuildingType.TOWER)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.TOWER].gold || gameState.resources.wood < COSTS[BuildingType.TOWER].wood}
                  />
                 </>
             )}
