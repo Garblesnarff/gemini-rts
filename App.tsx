@@ -35,6 +35,8 @@ export default function App() {
     wave: 1
   });
 
+  const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
+
   const waveTimerRef = useRef(0);
   const nextWaveTimeRef = useRef(60);
 
@@ -130,6 +132,20 @@ export default function App() {
   const handlePlaceBuilding = (pos: THREE.Vector3) => {
       const { active, type, cost } = gameState.placementMode;
       if (!active || !type) return;
+
+      const isVisible = gameState.entities.some(e => {
+          if (e.faction !== Faction.PLAYER || e.hp <= 0) return false;
+          const stats = UNIT_STATS[e.subType as keyof typeof UNIT_STATS];
+          const range = stats?.visionRange || 8;
+          const dx = e.position.x - pos.x;
+          const dz = e.position.z - pos.z;
+          return (dx * dx + dz * dz) <= (range * range);
+      });
+
+      if (!isVisible) {
+          addMessage("Cannot build in unexplored territory!", 'alert');
+          return;
+      }
 
       if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
           const peasantId = gameState.selection.find(id => {
@@ -585,8 +601,22 @@ export default function App() {
             onRightClickGround={handleRightClickGround}
             onRightClickEntity={handleRightClickEntity}
             onPlaceBuilding={handlePlaceBuilding}
+            onSelectionChange={setSelectionBox}
         />
       </Canvas>
+      {selectionBox && (
+          <div style={{
+              position: 'absolute',
+              left: Math.min(selectionBox.start.x, selectionBox.current.x),
+              top: Math.min(selectionBox.start.y, selectionBox.current.y),
+              width: Math.abs(selectionBox.current.x - selectionBox.start.x),
+              height: Math.abs(selectionBox.current.y - selectionBox.start.y),
+              border: '2px solid #00ff00',
+              backgroundColor: 'rgba(0, 255, 0, 0.2)',
+              pointerEvents: 'none',
+              zIndex: 100
+          }} />
+      )}
       {gameState.gameOver && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 text-white flex-col">
               <h1 className="text-6xl font-fantasy text-red-500 mb-4">DEFEAT</h1>

@@ -15,6 +15,7 @@ interface GameSceneProps {
   onRightClickGround: (pos: THREE.Vector3) => void;
   onRightClickEntity: (targetId: string) => void;
   onPlaceBuilding: (pos: THREE.Vector3) => void;
+  onSelectionChange: (box: {start: {x:number, y:number}, current: {x:number, y:number}} | null) => void;
 }
 
 const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> = ({ type, position }) => {
@@ -170,15 +171,159 @@ export const GameScene: React.FC<GameSceneProps> = ({
   onSelectEntity,
   onRightClickGround,
   onRightClickEntity,
-  onPlaceBuilding
+  onPlaceBuilding,
+  onSelectionChange
 }) => {
   const groundRef = useRef<THREE.Mesh>(null);
+  const controlsRef = useRef<any>(null); // Reference to OrbitControls
+  const keysPressed = useRef<Record<string, boolean>>({});
+
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [marker, setMarker] = useState<{pos: THREE.Vector3, color: string, id: number} | null>(null);
   
-  const [dragStart, setDragStart] = useState<THREE.Vector2 | null>(null);
-  const [dragCurrent, setDragCurrent] = useState<THREE.Vector2 | null>(null);
-  const { camera, size } = useThree();
+  // Use refs to track dragging state locally for event handlers without causing re-renders/stale closures
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{x: number, y: number} | null>(null);
+  
+  const entitiesRef = useRef(entities);
+  entitiesRef.current = entities; // Keep entities fresh
+
+  const { camera, size, gl } = useThree();
+
+  // Keyboard listeners for panning
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => { keysPressed.current[e.code] = true; };
+    const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.code] = false; };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+    }
+  }, []);
+
+  // Window Event Listeners for Dragging
+  useEffect(() => {
+      const handleWindowMove = (e: PointerEvent) => {
+          if (isDraggingRef.current && dragStartRef.current) {
+               const current = { x: e.clientX, y: e.clientY };
+               onSelectionChange({ start: dragStartRef.current, current });
+          }
+      };
+
+      const handleWindowUp = (e: PointerEvent) => {
+          if (isDraggingRef.current && dragStartRef.current) {
+              const start = dragStartRef.current;
+              const current = { x: e.clientX, y: e.clientY };
+              
+              const dx = current.x - start.x;
+              const dy = current.y - start.y;
+              const dist = Math.sqrt(dx*dx + dy*dy);
+
+              if (dist > 10) {
+                  // Box Select Logic
+                  const minX = Math.min(start.x, current.x);
+                  const maxX = Math.max(start.x, current.x);
+                  const minY = Math.min(start.y, current.y);
+                  const maxY = Math.max(start.y, current.y);
+
+                  const selected: string[] = [];
+                  entitiesRef.current.forEach(ent => {
+                      if (ent.faction === Faction.PLAYER && ent.type === EntityType.UNIT) {
+                          const pos = new THREE.Vector3(ent.position.x, ent.position.y, ent.position.z);
+                          pos.project(camera);
+                          // Convert normalized device coordinates to screen coordinates
+                          const x = (pos.x * .5 + .5) * size.width;
+                          const y = (-(pos.y * .5) + .5) * size.height;
+
+                          if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+                              selected.push(ent.id);
+                          }
+                      }
+                  });
+                  onSelectEntity(selected, e.shiftKey);
+              } else {
+                  // If clicking on the canvas directly (not on UI), clear selection
+                  // Note: Right click is handled separately. This is left click release.
+                  // We check if target is the canvas to avoid clearing when interacting with UI overlay
+                  if (e.target === gl.domElement) {
+                      onSelectEntity([], false);
+                  }
+              }
+              
+              // Reset
+              isDraggingRef.current = false;
+              dragStartRef.current = null;
+              onSelectionChange(null);
+          }
+      };
+
+      window.addEventListener('pointermove', handleWindowMove);
+      window.addEventListener('pointerup', handleWindowUp);
+      
+      return () => {
+          window.removeEventListener('pointermove', handleWindowMove);
+          window.removeEventListener('pointerup', handleWindowUp);
+      };
+  }, [camera, size, gl, onSelectEntity, onSelectionChange]);
+
+
+  // Camera Pan Loop
+  useFrame((state, delta) => {
+    const PAN_SPEED = 30 * delta;
+    const EDGE_THRESHOLD = 0.95;
+    const { pointer, camera } = state;
+
+    let moveX = 0;
+    let moveZ = 0;
+
+    // Keyboard Input
+    if (keysPressed.current['KeyW'] || keysPressed.current['ArrowUp']) moveZ -= 1;
+    if (keysPressed.current['KeyS'] || keysPressed.current['ArrowDown']) moveZ += 1;
+    if (keysPressed.current['KeyA'] || keysPressed.current['ArrowLeft']) moveX -= 1;
+    if (keysPressed.current['KeyD'] || keysPressed.current['ArrowRight']) moveX += 1;
+
+    // Edge Scrolling (Mouse)
+    // Only applies if pointer is active on canvas (normalized -1 to 1)
+    if (pointer.x > EDGE_THRESHOLD) moveX += 1;
+    if (pointer.x < -EDGE_THRESHOLD) moveX -= 1;
+    // In 3D (X,Z plane), "Up" on screen maps to decreasing Z (forward)
+    if (pointer.y > EDGE_THRESHOLD) moveZ -= 1; 
+    if (pointer.y < -EDGE_THRESHOLD) moveZ += 1;
+
+    if (moveX !== 0 || moveZ !== 0) {
+        // Normalize speed
+        const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        if (len > 0) {
+            moveX = moveX / len;
+            moveZ = moveZ / len;
+        }
+
+        const controls = controlsRef.current;
+        if (controls) {
+            const target = controls.target;
+            
+            const targetX = target.x + moveX * PAN_SPEED;
+            const targetZ = target.z + moveZ * PAN_SPEED;
+            
+            // Map Bounds clamping (-50 to 50)
+            const BOUNDS = 50;
+            const clampedTargetX = Math.max(-BOUNDS, Math.min(BOUNDS, targetX));
+            const clampedTargetZ = Math.max(-BOUNDS, Math.min(BOUNDS, targetZ));
+            
+            const deltaX = clampedTargetX - target.x;
+            const deltaZ = clampedTargetZ - target.z;
+            
+            if (deltaX !== 0 || deltaZ !== 0) {
+                camera.position.x += deltaX;
+                camera.position.z += deltaZ;
+                target.x += deltaX;
+                target.z += deltaZ;
+                controls.update();
+            }
+        }
+    }
+  });
 
   const spawnMarker = (pos: THREE.Vector3, color: string) => {
       setMarker({ pos, color, id: Date.now() });
@@ -186,61 +331,25 @@ export const GameScene: React.FC<GameSceneProps> = ({
 
   const handlePointerDown = (e: any) => {
       if (e.button === 0 && !placementMode.active) {
-          setDragStart(new THREE.Vector2(e.clientX, e.clientY));
-          setDragCurrent(new THREE.Vector2(e.clientX, e.clientY));
+          e.stopPropagation(); // Stop bubbling to orbit controls if clicking on ground
+          isDraggingRef.current = true;
+          dragStartRef.current = { x: e.clientX, y: e.clientY };
+          onSelectionChange({ start: dragStartRef.current, current: dragStartRef.current });
       }
   };
 
   const handlePointerMove = (e: any) => {
-      if (dragStart) {
-          setDragCurrent(new THREE.Vector2(e.clientX, e.clientY));
-      }
-      
+      // Logic for hover effect only
       if (e.intersections.length > 0) {
           const point = e.intersections[0].point;
            setHoverPos(new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z)));
       }
   };
 
-  const handlePointerUp = (e: any) => {
-      if (dragStart && dragCurrent && !placementMode.active) {
-          const dx = dragCurrent.x - dragStart.x;
-          const dy = dragCurrent.y - dragStart.y;
-          const dist = Math.sqrt(dx*dx + dy*dy);
-
-          if (dist > 10) {
-              const minX = Math.min(dragStart.x, dragCurrent.x);
-              const maxX = Math.max(dragStart.x, dragCurrent.x);
-              const minY = Math.min(dragStart.y, dragCurrent.y);
-              const maxY = Math.max(dragStart.y, dragCurrent.y);
-
-              const selected: string[] = [];
-              entities.forEach(ent => {
-                  if (ent.faction === Faction.PLAYER && ent.type === EntityType.UNIT) {
-                      const pos = new THREE.Vector3(ent.position.x, ent.position.y, ent.position.z);
-                      pos.project(camera);
-                      const x = (pos.x * .5 + .5) * size.width;
-                      const y = (-(pos.y * .5) + .5) * size.height;
-
-                      if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
-                          selected.push(ent.id);
-                      }
-                  }
-              });
-              onSelectEntity(selected, false);
-          } else {
-             if (e.object === groundRef.current) {
-                 onSelectEntity([], false);
-             }
-          }
-      }
-      setDragStart(null);
-      setDragCurrent(null);
-  };
-
   return (
     <>
       <OrbitControls 
+        ref={controlsRef}
         makeDefault 
         minPolarAngle={0} 
         maxPolarAngle={Math.PI / 2.2} 
@@ -251,7 +360,8 @@ export const GameScene: React.FC<GameSceneProps> = ({
           MIDDLE: THREE.MOUSE.ROTATE,
           RIGHT: null
         }}
-        enabled={!dragStart}
+        enabled={!isDraggingRef.current} 
+        enablePan={false}
       />
       
       <ambientLight intensity={0.6} color="#dbeafe" />
@@ -275,7 +385,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
         receiveShadow
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
         onClick={(e) => {
              if (placementMode.active && hoverPos) {
                  e.stopPropagation();
@@ -294,21 +403,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
       </mesh>
 
       <FogOfWarOverlay entities={entities} />
-      
-      {dragStart && dragCurrent && (
-          <Html fullscreen style={{ pointerEvents: 'none', zIndex: 100 }}>
-              <div style={{
-                  position: 'absolute',
-                  left: Math.min(dragStart.x, dragCurrent.x),
-                  top: Math.min(dragStart.y, dragCurrent.y),
-                  width: Math.abs(dragCurrent.x - dragStart.x),
-                  height: Math.abs(dragCurrent.y - dragStart.y),
-                  border: '2px solid #00ff00',
-                  backgroundColor: 'rgba(0, 255, 0, 0.2)',
-                  pointerEvents: 'none'
-              }} />
-          </Html>
-      )}
 
       {marker && <ClickMarker key={marker.id} position={marker.pos} color={marker.color} />}
       
