@@ -13,18 +13,24 @@ import {
   Skull,
   MousePointer2,
   Crosshair,
-  TowerControl
+  TowerControl,
+  Anvil,
+  Shield,
+  ArrowUp,
+  CircleStop,
+  Hand
 } from 'lucide-react';
-import { GameState, Entity, UnitType, BuildingType, EntityType, Faction } from '../types';
+import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, UpgradeType } from '../types';
 import { COSTS, UNIT_STATS } from '../constants';
 
 interface UIOverlayProps {
   gameState: GameState;
   onTrainUnit: (type: UnitType) => void;
+  onResearch: (type: UpgradeType) => void;
   onBuild: (type: BuildingType) => void;
   onGetLore: (entity: Entity) => void;
   onGetAdvisor: () => void;
-  onCommand: (cmd: 'ATTACK_MOVE') => void;
+  onCommand: (cmd: 'ATTACK_MOVE' | 'STOP' | 'HOLD' | 'PATROL') => void;
 }
 
 const Portrait = ({ type }: { type: string }) => {
@@ -37,6 +43,7 @@ const Portrait = ({ type }: { type: string }) => {
     [BuildingType.BARRACKS]: 'bg-red-800',
     [BuildingType.FARM]: 'bg-green-700',
     [BuildingType.TOWER]: 'bg-stone-500',
+    [BuildingType.BLACKSMITH]: 'bg-stone-700',
   };
 
   return (
@@ -49,6 +56,7 @@ const Portrait = ({ type }: { type: string }) => {
 export const UIOverlay: React.FC<UIOverlayProps> = ({ 
   gameState, 
   onTrainUnit, 
+  onResearch,
   onBuild,
   onGetLore,
   onGetAdvisor,
@@ -101,7 +109,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
       )}
       {gameState.commandMode.active && (
           <div className="w-full bg-red-900/80 text-center py-2 border-b border-red-500 animate-pulse">
-              <span className="text-red-100 font-bold uppercase tracking-widest">Select Target for Attack Move</span>
+              <span className="text-red-100 font-bold uppercase tracking-widest">Select Target for {gameState.commandMode.type}</span>
           </div>
       )}
 
@@ -124,8 +132,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
             <div className="flex items-center space-x-2">
                  <span className="font-bold border border-gray-500 px-1 rounded">A</span>
                  <span>Attack Move</span>
-                 <span className="font-bold border border-gray-500 px-1 rounded ml-2">Ctrl + 0-9</span>
-                 <span>Group</span>
+                 <span className="font-bold border border-gray-500 px-1 rounded ml-2">P</span>
+                 <span>Patrol</span>
+                 <span className="font-bold border border-gray-500 px-1 rounded ml-2">H</span>
+                 <span>Hold</span>
+                 <span className="font-bold border border-gray-500 px-1 rounded ml-2">S</span>
+                 <span>Stop</span>
             </div>
           </div>
       </div>
@@ -183,14 +195,14 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               {/* Queue Display for Buildings */}
               {selectedEntity.type === EntityType.BUILDING && selectedEntity.productionQueue && selectedEntity.productionQueue.length > 0 && (
                   <div className="w-full mb-2">
-                      <div className="text-xs text-left mb-1 text-gold-400">Training: {selectedEntity.productionQueue[0].unitType}</div>
+                      <div className="text-xs text-left mb-1 text-gold-400">Production: {selectedEntity.productionQueue[0].name}</div>
                       <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden mb-1">
                         <div className="bg-blue-500 h-full transition-all duration-100" style={{ width: `${(selectedEntity.productionQueue[0].progress / selectedEntity.productionQueue[0].totalTime) * 100}%` }}></div>
                       </div>
                       <div className="flex space-x-1">
                           {selectedEntity.productionQueue.slice(1).map((item, idx) => (
                               <div key={idx} className="w-6 h-6 bg-gray-700 border border-gray-500 flex items-center justify-center text-[8px]">
-                                  {item.unitType[0]}
+                                  {item.name[0]}
                               </div>
                           ))}
                       </div>
@@ -214,15 +226,35 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         <div className="flex-1 bg-stone-900 p-4 grid grid-cols-4 grid-rows-2 gap-2">
              {/* General Unit Commands */}
              {selectedEntity && selectedEntity.type === EntityType.UNIT && selectedEntity.faction === Faction.PLAYER && (
-                 <ActionButton 
-                    icon={<Crosshair />} 
-                    label="Attack (A)" 
-                    cost={{gold:0,wood:0}} 
-                    onClick={() => onCommand('ATTACK_MOVE')} 
-                 />
+                 <>
+                   <ActionButton 
+                      icon={<Crosshair />} 
+                      label="Attack (A)" 
+                      cost={{gold:0,wood:0}} 
+                      onClick={() => onCommand('ATTACK_MOVE')} 
+                   />
+                   <ActionButton 
+                      icon={<CircleStop />} 
+                      label="Stop (S)" 
+                      cost={{gold:0,wood:0}} 
+                      onClick={() => onCommand('STOP')} 
+                   />
+                   <ActionButton 
+                      icon={<Hand />} 
+                      label="Hold (H)" 
+                      cost={{gold:0,wood:0}} 
+                      onClick={() => onCommand('HOLD')} 
+                   />
+                   <ActionButton 
+                      icon={<ArrowUp />} 
+                      label="Patrol (P)" 
+                      cost={{gold:0,wood:0}} 
+                      onClick={() => onCommand('PATROL')} 
+                   />
+                 </>
              )}
 
-            {/* Building Production Commands */}
+            {/* Town Hall Production */}
             {selectedEntity && selectedEntity.type === EntityType.BUILDING && selectedEntity.subType === BuildingType.TOWN_HALL && (
                  <ActionButton 
                     icon={<Users />} 
@@ -232,6 +264,8 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     disabled={gameState.resources.gold < COSTS[UnitType.PEASANT].gold}
                  />
             )}
+            
+            {/* Barracks Production */}
             {selectedEntity && selectedEntity.type === EntityType.BUILDING && selectedEntity.subType === BuildingType.BARRACKS && (
                 <>
                  <ActionButton 
@@ -255,6 +289,48 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     onClick={() => onTrainUnit(UnitType.KNIGHT)} 
                     disabled={gameState.resources.gold < COSTS[UnitType.KNIGHT].gold}
                  />
+                </>
+            )}
+
+            {/* Blacksmith Research */}
+            {selectedEntity && selectedEntity.type === EntityType.BUILDING && selectedEntity.subType === BuildingType.BLACKSMITH && (
+                <>
+                 {!gameState.upgrades[UpgradeType.IRON_SWORDS] && (
+                   <ActionButton 
+                      icon={<Sword />} 
+                      label="Iron Swords" 
+                      cost={COSTS[UpgradeType.IRON_SWORDS]} 
+                      onClick={() => onResearch(UpgradeType.IRON_SWORDS)} 
+                      disabled={gameState.resources.gold < COSTS[UpgradeType.IRON_SWORDS].gold}
+                   />
+                 )}
+                 {!gameState.upgrades[UpgradeType.STEEL_ARROWS] && (
+                   <ActionButton 
+                      icon={<Crosshair />} 
+                      label="Steel Arrows" 
+                      cost={COSTS[UpgradeType.STEEL_ARROWS]} 
+                      onClick={() => onResearch(UpgradeType.STEEL_ARROWS)} 
+                      disabled={gameState.resources.gold < COSTS[UpgradeType.STEEL_ARROWS].gold}
+                   />
+                 )}
+                 {!gameState.upgrades[UpgradeType.LEATHER_ARMOR] && (
+                   <ActionButton 
+                      icon={<Shield />} 
+                      label="Leather Armor" 
+                      cost={COSTS[UpgradeType.LEATHER_ARMOR]} 
+                      onClick={() => onResearch(UpgradeType.LEATHER_ARMOR)} 
+                      disabled={gameState.resources.gold < COSTS[UpgradeType.LEATHER_ARMOR].gold}
+                   />
+                 )}
+                 {!gameState.upgrades[UpgradeType.PLATE_ARMOR] && (
+                   <ActionButton 
+                      icon={<ShieldAlert />} 
+                      label="Plate Armor" 
+                      cost={COSTS[UpgradeType.PLATE_ARMOR]} 
+                      onClick={() => onResearch(UpgradeType.PLATE_ARMOR)} 
+                      disabled={gameState.resources.gold < COSTS[UpgradeType.PLATE_ARMOR].gold}
+                   />
+                 )}
                 </>
             )}
             
@@ -281,6 +357,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     cost={COSTS[BuildingType.TOWER]} 
                     onClick={() => onBuild(BuildingType.TOWER)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.TOWER].gold || gameState.resources.wood < COSTS[BuildingType.TOWER].wood}
+                 />
+                 <ActionButton 
+                    icon={<Anvil />} 
+                    label="Blacksmith" 
+                    cost={COSTS[BuildingType.BLACKSMITH]} 
+                    onClick={() => onBuild(BuildingType.BLACKSMITH)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.BLACKSMITH].gold || gameState.resources.wood < COSTS[BuildingType.BLACKSMITH].wood}
                  />
                 </>
             )}

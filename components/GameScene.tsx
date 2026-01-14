@@ -25,12 +25,18 @@ interface GameSceneProps {
 const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> = ({ type, position }) => {
   const isTownHall = type === BuildingType.TOWN_HALL;
   const isTower = type === BuildingType.TOWER;
+  const isBlacksmith = type === BuildingType.BLACKSMITH;
   
   return (
     <group position={position}>
       {isTower ? (
         <mesh position={[0, 2, 0]} raycast={() => null}>
             <cylinderGeometry args={[0.8, 1.2, 4, 6]} />
+            <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+        </mesh>
+      ) : isBlacksmith ? (
+        <mesh position={[0, 1.5, 0]} raycast={() => null}>
+            <boxGeometry args={[3, 3, 3]} />
             <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
         </mesh>
       ) : (
@@ -122,12 +128,7 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
             
             // X Mapping: -60 to 60 -> 0 to 127
             const gridX = Math.floor(((e.position.x + 60) / 120) * (GRID_SIZE - 1));
-            
-            // Z Mapping FIX: Because of rotation -PI/2 on X, 
-            // UV.y=0 is at Z=60 and UV.y=1 is at Z=-60.
-            // So we use (60 - Z) to map correctly.
             const gridY = Math.floor(((60 - e.position.z) / 120) * (GRID_SIZE - 1));
-            
             const gridRange = Math.ceil((range / 120) * GRID_SIZE);
 
             for (let y = -gridRange; y <= gridRange; y++) {
@@ -221,7 +222,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
   useEffect(() => {
     if (placementMode.active) {
         document.body.style.cursor = 'crosshair';
-    } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE') {
+    } else if (commandMode.active) {
         document.body.style.cursor = 'crosshair';
     } else {
         document.body.style.cursor = 'default';
@@ -407,10 +408,11 @@ export const GameScene: React.FC<GameSceneProps> = ({
              if (placementMode.active && hoverPos) {
                  e.stopPropagation();
                  onPlaceBuilding(hoverPos);
-             } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE' && hoverPos) {
+             } else if (commandMode.active && (commandMode.type === 'ATTACK_MOVE' || commandMode.type === 'PATROL') && hoverPos) {
                  e.stopPropagation();
-                 spawnMarker(hoverPos, '#ef4444');
-                 onAttackMove(hoverPos);
+                 const color = commandMode.type === 'ATTACK_MOVE' ? '#ef4444' : '#3b82f6';
+                 spawnMarker(hoverPos, color);
+                 onAttackMove(hoverPos); // We reuse the handler for both, App handles difference based on state
              }
         }}
         onContextMenu={(e) => {
@@ -432,11 +434,11 @@ export const GameScene: React.FC<GameSceneProps> = ({
           <GhostBuilding type={placementMode.type} position={hoverPos} />
       )}
 
-       {/* Attack Move Crosshair Cursor helper (optional 3d cursor) */}
-       {commandMode.active && commandMode.type === 'ATTACK_MOVE' && hoverPos && (
+       {/* Attack Move / Patrol Crosshair Cursor helper */}
+       {commandMode.active && hoverPos && (
           <mesh position={[hoverPos.x, 0.5, hoverPos.z]} rotation={[-Math.PI/2, 0, 0]} raycast={() => null}>
              <ringGeometry args={[0.5, 0.6, 16]} />
-             <meshBasicMaterial color="#ef4444" opacity={0.8} transparent />
+             <meshBasicMaterial color={commandMode.type === 'ATTACK_MOVE' ? "#ef4444" : "#3b82f6"} opacity={0.8} transparent />
           </mesh>
        )}
 
@@ -451,9 +453,9 @@ export const GameScene: React.FC<GameSceneProps> = ({
                 if (!placementMode.active && !commandMode.active && entity.visible) {
                     e.stopPropagation();
                     onSelectEntity([entity.id], e.shiftKey);
-                } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE' && entity.visible) {
+                } else if (commandMode.active && entity.visible) {
                     e.stopPropagation();
-                    // Clicking an entity in attack move mode is basically a direct attack command
+                    // Clicking an entity in attack/patrol mode
                     onRightClickEntity(entity.id);
                 }
             }}

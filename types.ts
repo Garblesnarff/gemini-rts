@@ -16,12 +16,20 @@ export enum BuildingType {
   TOWN_HALL = 'Town Hall',
   BARRACKS = 'Barracks',
   FARM = 'Farm',
-  TOWER = 'Scout Tower'
+  TOWER = 'Scout Tower',
+  BLACKSMITH = 'Blacksmith'
 }
 
 export enum ResourceType {
   GOLD = 'Gold',
   WOOD = 'Wood'
+}
+
+export enum UpgradeType {
+  IRON_SWORDS = 'Iron Swords',
+  STEEL_ARROWS = 'Steel Arrows',
+  LEATHER_ARMOR = 'Leather Armor',
+  PLATE_ARMOR = 'Plate Armor'
 }
 
 export enum Faction {
@@ -38,7 +46,8 @@ export interface Position {
 
 export interface QueueItem {
   id: string;
-  unitType: UnitType;
+  type: 'UNIT' | 'UPGRADE';
+  name: string;
   progress: number;
   totalTime: number;
 }
@@ -59,6 +68,9 @@ export interface Entity {
   
   // Advanced Movement
   attackMoveDestination?: Position | null; // If set, unit returns to moving here after combat
+  holdPosition?: boolean;
+  patrolPoints?: [Position, Position];
+  patrolIndex?: number;
 
   // Economy
   resourceAmount?: number;
@@ -100,7 +112,7 @@ export interface PlacementMode {
 
 export interface CommandMode {
   active: boolean;
-  type: 'ATTACK_MOVE' | null;
+  type: 'ATTACK_MOVE' | 'PATROL' | null;
 }
 
 export interface GameState {
@@ -120,6 +132,7 @@ export interface GameState {
   commandMode: CommandMode;
   gameOver: boolean;
   wave: number;
+  upgrades: Record<string, boolean>; // Key is UpgradeType value
 }
 
 export interface LogMessage {

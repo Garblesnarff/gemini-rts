@@ -132,6 +132,13 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
         </mesh>
       )}
 
+      {entity.holdPosition && entity.faction === Faction.PLAYER && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.1, 0]}>
+             <ringGeometry args={[0.5, 0.55, 16]} />
+             <meshBasicMaterial color="orange" opacity={0.8} transparent />
+          </mesh>
+      )}
+
       <mesh position={[0, 0.6, 0]} castShadow receiveShadow>
         {geometry}
         <meshStandardMaterial color={color} roughness={0.7} />
@@ -173,6 +180,7 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
 export const Building3D: React.FC<EntityProps> = ({ entity }) => {
   const isTownHall = entity.subType === BuildingType.TOWN_HALL;
   const isTower = entity.subType === BuildingType.TOWER;
+  const isBlacksmith = entity.subType === BuildingType.BLACKSMITH;
   
   if (!entity.visible && entity.faction !== Faction.PLAYER) return null;
 
@@ -194,6 +202,25 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
             <mesh position={[0, 4.2, 0]} castShadow>
                 <cylinderGeometry args={[1.2, 0.8, 1, 6]} />
                 <meshStandardMaterial color={entity.faction === Faction.PLAYER ? "#1e3a8a" : "#7f1d1d"} />
+            </mesh>
+        </group>
+      ) : isBlacksmith ? (
+        <group>
+            <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
+                <boxGeometry args={[3, 3, 3]} />
+                <meshStandardMaterial color="#292524" roughness={0.9} />
+            </mesh>
+            <mesh position={[0.8, 3.5, 0.8]}>
+                <cylinderGeometry args={[0.4, 0.6, 2, 8]} />
+                <meshStandardMaterial color="#1c1917" />
+            </mesh>
+             <mesh position={[0, 4, 0]}>
+                <points>
+                   <bufferGeometry>
+                       <bufferAttribute attach="attributes-position" count={1} array={new Float32Array([0,0,0])} itemSize={3} />
+                   </bufferGeometry>
+                   <pointsMaterial color="orange" size={0.5} />
+                </points>
             </mesh>
         </group>
       ) : (

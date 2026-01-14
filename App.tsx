@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 import { GameScene } from './components/GameScene';
 import { UIOverlay } from './components/UIOverlay';
-import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType } from './types';
+import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType, UpgradeType } from './types';
 import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
@@ -35,7 +35,8 @@ export default function App() {
     placementMode: { active: false, type: null, cost: { gold: 0, wood: 0 } },
     commandMode: { active: false, type: null },
     gameOver: false,
-    wave: 1
+    wave: 1,
+    upgrades: {} as Record<UpgradeType, boolean>
   });
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
@@ -57,7 +58,7 @@ export default function App() {
       const handleKeyDown = (e: KeyboardEvent) => {
           if (gameState.gameOver) return;
 
-          // 1. Command Mode (A)
+          // 1. Command Mode (A, P)
           if (e.code === 'KeyA') {
               setGameState(prev => ({
                   ...prev,
@@ -66,8 +67,26 @@ export default function App() {
               }));
               return;
           }
+          if (e.code === 'KeyP') {
+              setGameState(prev => ({
+                  ...prev,
+                  placementMode: { active: false, type: null, cost: {gold:0, wood:0} },
+                  commandMode: { active: true, type: 'PATROL' }
+              }));
+              return;
+          }
 
-          // 2. Escape to Cancel
+          // 2. Immediate Commands (H, S)
+          if (e.code === 'KeyH') {
+              handleCommand('HOLD');
+              return;
+          }
+          if (e.code === 'KeyS') {
+              handleCommand('STOP');
+              return;
+          }
+
+          // 3. Escape to Cancel
           if (e.code === 'Escape') {
               setGameState(prev => ({
                   ...prev,
@@ -78,7 +97,7 @@ export default function App() {
               return;
           }
 
-          // 3. Control Groups (1-9)
+          // 4. Control Groups (1-9)
           const isNum = /Digit[1-9]/.test(e.code);
           if (isNum) {
               const groupNum = e.key;
@@ -185,7 +204,9 @@ export default function App() {
               state: 'moving',
               targetPos: { x: point.x, y: 0, z: point.z },
               targetId: null,
-              attackMoveDestination: null // Clear attack move if normal move
+              attackMoveDestination: null,
+              patrolPoints: undefined,
+              holdPosition: false
             };
           }
           return e;
@@ -195,6 +216,9 @@ export default function App() {
   };
 
   const handleAttackMove = (point: THREE.Vector3) => {
+      const isPatrol = gameState.commandMode.type === 'PATROL';
+      const isAttack = gameState.commandMode.type === 'ATTACK_MOVE';
+
       setGameState(prev => {
           const selectedIds = prev.selection;
           return {
@@ -202,17 +226,34 @@ export default function App() {
               commandMode: { active: false, type: null },
               entities: prev.entities.map(e => {
                   if (selectedIds.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
-                      return {
-                          ...e,
+                      const baseUpdates: Partial<Entity> = {
                           state: 'moving',
                           targetPos: { x: point.x, y: 0, z: point.z },
-                          attackMoveDestination: { x: point.x, y: 0, z: point.z }, // Mark as attack move
-                          targetId: null
+                          targetId: null,
+                          holdPosition: false
                       };
+
+                      if (isPatrol) {
+                          return {
+                              ...e,
+                              ...baseUpdates,
+                              patrolPoints: [ { ...e.position }, { x: point.x, y: 0, z: point.z } ],
+                              patrolIndex: 1,
+                              attackMoveDestination: null
+                          }
+                      } else {
+                          // Attack Move
+                          return {
+                              ...e,
+                              ...baseUpdates,
+                              attackMoveDestination: { x: point.x, y: 0, z: point.z },
+                              patrolPoints: undefined
+                          }
+                      }
                   }
                   return e;
               }),
-              messages: [...prev.messages, { id: uuidv4(), text: "Attack Move!", type: 'info', timestamp: Date.now() }]
+              messages: [...prev.messages, { id: uuidv4(), text: isPatrol ? "Patrol route set." : "Attack Move!", type: 'info', timestamp: Date.now() }]
           };
       });
   };
@@ -231,15 +272,18 @@ export default function App() {
 
       const newEntities = prev.entities.map(e => {
           if (prev.selection.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
+            // Reset special states
+            const resetState = { patrolPoints: undefined, holdPosition: false, attackMoveDestination: null };
+
             // Attack Enemy
             if (target.faction === Faction.ENEMY) {
                 actionTriggered = true;
                 return { 
                     ...e, 
+                    ...resetState,
                     state: 'attacking', 
                     targetId: target.id, 
-                    targetPos: null,
-                    attackMoveDestination: null 
+                    targetPos: null
                 };
             }
             // Gather Resource
@@ -247,21 +291,21 @@ export default function App() {
                 actionTriggered = true;
                 return { 
                     ...e, 
+                    ...resetState,
                     state: 'gathering', 
                     targetId: target.id, 
                     targetPos: null, 
-                    lastResourceId: target.id,
-                    attackMoveDestination: null
+                    lastResourceId: target.id
                 };
             }
             // Follow/Guard (Basic Move to pos)
             actionTriggered = true;
             return { 
                 ...e, 
+                ...resetState,
                 state: 'moving', 
                 targetPos: target.position, 
-                targetId: null,
-                attackMoveDestination: null
+                targetId: null
             };
           }
           return e;
@@ -362,7 +406,7 @@ export default function App() {
                 ...building,
                 productionQueue: [
                     ...building.productionQueue, 
-                    { id: uuidv4(), unitType: type, progress: 0, totalTime: cost.time }
+                    { id: uuidv4(), type: 'UNIT', name: type, progress: 0, totalTime: cost.time }
                 ]
             };
 
@@ -376,6 +420,43 @@ export default function App() {
     } else {
         addMessage("Not enough resources!", 'alert');
     }
+  };
+
+  const handleResearch = (type: UpgradeType) => {
+      const cost = COSTS[type];
+      if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
+          const buildingId = gameState.selection[0];
+          setGameState(prev => {
+              const building = prev.entities.find(e => e.id === buildingId);
+              if (!building || !building.productionQueue) return prev;
+              
+              if (building.productionQueue.length > 0) {
+                  return { ...prev, messages: [...prev.messages, { id: uuidv4(), text: "Research queue busy!", type: 'alert', timestamp: Date.now() }] };
+              }
+
+              const newResources = {
+                  ...prev.resources,
+                  gold: prev.resources.gold - cost.gold,
+                  wood: prev.resources.wood - cost.wood
+              };
+              
+               const updatedBuilding = {
+                  ...building,
+                  productionQueue: [
+                      { id: uuidv4(), type: 'UPGRADE', name: type, progress: 0, totalTime: cost.time }
+                  ]
+              };
+
+               return {
+                  ...prev,
+                  resources: newResources,
+                  entities: prev.entities.map(e => e.id === buildingId ? updatedBuilding : e),
+                  messages: [...prev.messages, { id: uuidv4(), text: `Researching ${type}...`, type: 'info', timestamp: Date.now() }]
+              };
+          });
+      } else {
+          addMessage("Not enough resources!", 'alert');
+      }
   };
 
   const handleBuild = (type: BuildingType) => {
@@ -398,11 +479,51 @@ export default function App() {
       addMessage(tip, 'lore');
   }
 
-  const handleCommand = (cmd: 'ATTACK_MOVE') => {
-      setGameState(prev => ({
-          ...prev,
-          commandMode: { active: true, type: cmd }
-      }));
+  const handleCommand = (cmd: 'ATTACK_MOVE' | 'STOP' | 'HOLD' | 'PATROL') => {
+      if (cmd === 'ATTACK_MOVE' || cmd === 'PATROL') {
+          setGameState(prev => ({
+              ...prev,
+              commandMode: { active: true, type: cmd }
+          }));
+      } else if (cmd === 'STOP') {
+          setGameState(prev => ({
+              ...prev,
+              entities: prev.entities.map(e => {
+                  if (prev.selection.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
+                      return {
+                          ...e,
+                          state: 'idle',
+                          targetId: null,
+                          targetPos: null,
+                          patrolPoints: undefined,
+                          attackMoveDestination: null,
+                          holdPosition: false
+                      };
+                  }
+                  return e;
+              })
+          }));
+          addMessage("Units Stopped.");
+      } else if (cmd === 'HOLD') {
+          setGameState(prev => ({
+              ...prev,
+              entities: prev.entities.map(e => {
+                  if (prev.selection.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
+                      return {
+                          ...e,
+                          state: 'idle',
+                          targetId: null,
+                          targetPos: null,
+                          patrolPoints: undefined,
+                          attackMoveDestination: null,
+                          holdPosition: true
+                      };
+                  }
+                  return e;
+              })
+          }));
+          addMessage("Holding Position.");
+      }
   };
 
   // --- GAME LOOP ---
@@ -417,10 +538,30 @@ export default function App() {
             let messages = [...prev.messages];
             let newProjectiles = [...prev.projectiles];
             let newFloatingTexts = [...prev.floatingTexts];
+            let newUpgrades = { ...prev.upgrades };
             let hasChanges = false;
             let currentWave = prev.wave;
 
             const delta = 1000/30; // approx ms per frame
+
+            // Helper for Stats with Upgrades
+            const getStats = (type: UnitType | BuildingType) => {
+                const base = UNIT_STATS[type];
+                const s = { ...base };
+                if (prev.upgrades[UpgradeType.IRON_SWORDS] && (type === UnitType.FOOTMAN || type === UnitType.KNIGHT)) {
+                    s.damage += 3;
+                }
+                if (prev.upgrades[UpgradeType.STEEL_ARROWS] && (type === UnitType.ARCHER || type === BuildingType.TOWER)) {
+                    s.damage += 4;
+                }
+                if (prev.upgrades[UpgradeType.LEATHER_ARMOR] && (type === UnitType.FOOTMAN || type === UnitType.ARCHER)) {
+                    s.hp += 50; 
+                }
+                if (prev.upgrades[UpgradeType.PLATE_ARMOR] && (type === UnitType.KNIGHT)) {
+                    s.hp += 100;
+                }
+                return s;
+            };
 
             // 1. WAVE LOGIC
             waveTimerRef.current += 1/30;
@@ -462,31 +603,36 @@ export default function App() {
                     currentItem.progress += delta;
                     
                     if (currentItem.progress >= currentItem.totalTime) {
-                        // Spawn Unit
-                        const spawnPos = { x: e.position.x + 3, y: 0, z: e.position.z + 3 };
-                        const newUnit: Entity = {
-                            id: uuidv4(),
-                            type: EntityType.UNIT,
-                            subType: currentItem.unitType,
-                            faction: Faction.PLAYER,
-                            position: spawnPos,
-                            hp: UNIT_STATS[currentItem.unitType].hp,
-                            maxHp: UNIT_STATS[currentItem.unitType].hp,
-                            state: 'idle',
-                            name: `${currentItem.unitType}`,
-                            lastAttackTime: 0,
-                            visible: true,
-                        };
+                        // Complete Item
+                        if (currentItem.type === 'UNIT') {
+                            const spawnPos = { x: e.position.x + 3, y: 0, z: e.position.z + 3 };
+                            const uStats = getStats(currentItem.name as UnitType);
+                            const newUnit: Entity = {
+                                id: uuidv4(),
+                                type: EntityType.UNIT,
+                                subType: currentItem.name as UnitType,
+                                faction: Faction.PLAYER,
+                                position: spawnPos,
+                                hp: uStats.hp,
+                                maxHp: uStats.hp,
+                                state: 'idle',
+                                name: `${currentItem.name}`,
+                                lastAttackTime: 0,
+                                visible: true,
+                            };
 
-                        // Check Rally Point
-                        if (e.rallyPoint) {
-                            newUnit.state = 'moving';
-                            newUnit.targetPos = e.rallyPoint;
-                            newUnit.attackMoveDestination = e.rallyPoint; // Auto attack move to rally
+                            // Check Rally Point
+                            if (e.rallyPoint) {
+                                newUnit.state = 'moving';
+                                newUnit.targetPos = e.rallyPoint;
+                                newUnit.attackMoveDestination = e.rallyPoint; // Auto attack move to rally
+                            }
+                            spawnedUnits.push(newUnit);
+                            messages.push({ id: uuidv4(), text: `${currentItem.name} Ready!`, type: 'info', timestamp: Date.now() });
+                        } else if (currentItem.type === 'UPGRADE') {
+                             newUpgrades[currentItem.name as UpgradeType] = true;
+                             messages.push({ id: uuidv4(), text: `${currentItem.name} Researched!`, type: 'info', timestamp: Date.now() });
                         }
-
-                        spawnedUnits.push(newUnit);
-                        messages.push({ id: uuidv4(), text: `${currentItem.unitType} Ready!`, type: 'info', timestamp: Date.now() });
                         
                         // Shift queue
                         const newQueue = currentQueue.slice(1);
@@ -517,7 +663,7 @@ export default function App() {
                 } else {
                     let isVisible = false;
                     for (const p of playerEntities) {
-                        const stats = UNIT_STATS[p.subType as keyof typeof UNIT_STATS];
+                        const stats = getStats(p.subType as UnitType);
                         const range = stats?.visionRange || 8;
                         const dx = entity.position.x - p.position.x;
                         const dz = entity.position.z - p.position.z;
@@ -564,7 +710,20 @@ export default function App() {
                 const CARRY_CAPACITY = 10;
                 const TICK_SPEED = 0.033;
                 let pos = { ...entity.position };
-                const stats = UNIT_STATS[entity.subType as UnitType] || UNIT_STATS[UnitType.PEASANT];
+                const stats = getStats(entity.subType as UnitType);
+
+                // Update MaxHP dynamically if upgrade just finished (simple check: if current maxHp < stats.maxHp)
+                // Note: This logic runs every frame, but stats.hp is constant unless upgrade changes. 
+                // We update maxHp but not current HP to simulate "cap increase".
+                if (entity.faction === Faction.PLAYER && entity.type === EntityType.UNIT) {
+                    if (entity.maxHp < stats.hp) {
+                         // Upgrade applied, heal the difference? Or just raise cap? 
+                         // Standard: Raise cap, percentage stays same OR amount stays same. 
+                         // Simplest for now: Raise cap, keep current HP (so they look damaged).
+                         hasChanges = true;
+                         return { ...entity, maxHp: stats.hp };
+                    }
+                }
 
                 // Unit Separation
                 if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking' || entity.state === 'gathering' || entity.state === 'returning')) {
@@ -594,10 +753,10 @@ export default function App() {
 
                 // --- AUTO RETALIATION & ATTACK MOVE SCANNING ---
                 if (entity.type === EntityType.UNIT && entity.faction === Faction.PLAYER) {
-                    const isAttackMove = entity.state === 'moving' && entity.attackMoveDestination;
+                    const isAttackMove = entity.state === 'moving' && (entity.attackMoveDestination || entity.patrolPoints);
                     const isIdle = entity.state === 'idle';
 
-                    if (isIdle || isAttackMove) {
+                    if ((isIdle || isAttackMove) && !entity.holdPosition) {
                         // Scan for enemies
                         let closestEnemy = null;
                         let minDst = AGGRO_RANGE;
@@ -619,9 +778,28 @@ export default function App() {
                                 state: 'attacking', 
                                 targetId: closestEnemy.id, 
                                 position: pos,
-                                // If we were attack-moving, keep the destination, otherwise null
-                                attackMoveDestination: entity.attackMoveDestination || null 
+                                // Maintain special movement states for after combat
+                                attackMoveDestination: entity.attackMoveDestination,
+                                patrolPoints: entity.patrolPoints,
+                                patrolIndex: entity.patrolIndex
                             };
+                        }
+                    } else if (entity.holdPosition && isIdle) {
+                        // Hold Position: Only attack if in range
+                        const range = stats.range || 2;
+                        for(const other of prev.entities) {
+                            if (other.faction === Faction.ENEMY && other.hp > 0 && other.visible) {
+                                const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
+                                if (d <= range) {
+                                    hasChanges = true;
+                                    return { 
+                                        ...entity, 
+                                        state: 'attacking', 
+                                        targetId: other.id, 
+                                        position: pos
+                                    };
+                                }
+                            }
                         }
                     }
                 }
@@ -683,6 +861,18 @@ export default function App() {
                     
                     if (dist < 0.5) {
                         hasChanges = true;
+                        
+                        // Patrol Logic
+                        if (entity.patrolPoints && entity.patrolIndex !== undefined) {
+                            const nextIndex = (entity.patrolIndex + 1) % 2;
+                            return { 
+                                ...entity, 
+                                position: pos, 
+                                patrolIndex: nextIndex, 
+                                targetPos: entity.patrolPoints[nextIndex] 
+                            };
+                        }
+
                         // Reached destination. Clear attack move flag.
                         return { ...entity, state: 'idle', targetPos: null, position: pos, attackMoveDestination: null };
                     } else {
@@ -765,9 +955,11 @@ export default function App() {
                 // Attacking
                 if (entity.state === 'attacking' && entity.targetId) {
                      const target = prev.entities.find(t => t.id === entity.targetId);
+                     
+                     // Target Invalid Check
                      if (!target || target.hp <= 0 || !target.visible) {
                          hasChanges = true;
-                         // Resume attack move if applicable
+                         // Resume attack move or Patrol if applicable
                          if (entity.attackMoveDestination) {
                              return { 
                                  ...entity, 
@@ -777,14 +969,30 @@ export default function App() {
                                  position: pos 
                              };
                          }
+                         if (entity.patrolPoints && entity.patrolIndex !== undefined) {
+                              return {
+                                  ...entity,
+                                  state: 'moving',
+                                  targetPos: entity.patrolPoints[entity.patrolIndex],
+                                  targetId: null,
+                                  position: pos
+                              };
+                         }
                          return { ...entity, state: 'idle', position: pos };
                      }
-
+                     
+                     // Hold Position Range Check
+                     const range = stats.range || 2;
                      const dx = target.position.x - pos.x;
                      const dz = target.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
-                     const range = stats.range || 2;
-                     
+
+                     if (entity.holdPosition && dist > range) {
+                         hasChanges = true;
+                         // Lost target due to hold position
+                         return { ...entity, state: 'idle', targetId: null, position: pos };
+                     }
+
                      if (dist > range) {
                          const speed = (stats.speed || 3) * TICK_SPEED;
                          hasChanges = true;
@@ -833,6 +1041,8 @@ export default function App() {
                 gameOver = true;
             }
             if (survivingEntities.length !== prev.entities.length) hasChanges = true;
+            if (JSON.stringify(newUpgrades) !== JSON.stringify(prev.upgrades)) hasChanges = true;
+
             newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
             if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
             
@@ -848,7 +1058,8 @@ export default function App() {
                 wave: currentWave,
                 gameOver,
                 messages,
-                selection: newSelection
+                selection: newSelection,
+                upgrades: newUpgrades
             } : prev;
         });
     }, 1000 / 30); 
@@ -896,6 +1107,7 @@ export default function App() {
       <UIOverlay 
         gameState={gameState} 
         onTrainUnit={handleTrainUnit}
+        onResearch={handleResearch}
         onBuild={handleBuild}
         onGetLore={handleLore}
         onGetAdvisor={handleAdvisor}

@@ -1,5 +1,5 @@
 
-import { UnitType, BuildingType } from './types';
+import { UnitType, BuildingType, UpgradeType } from './types';
 
 export const COSTS = {
   [UnitType.PEASANT]: { gold: 50, wood: 0, food: 1, time: 2000 },
@@ -10,6 +10,12 @@ export const COSTS = {
   [BuildingType.BARRACKS]: { gold: 200, wood: 100, time: 5000 },
   [BuildingType.FARM]:     { gold: 80, wood: 40, time: 3000 },
   [BuildingType.TOWER]:    { gold: 150, wood: 120, time: 4000 },
+  [BuildingType.BLACKSMITH]: { gold: 200, wood: 150, time: 6000 },
+
+  [UpgradeType.IRON_SWORDS]: { gold: 150, wood: 100, time: 15000 }, // 15s
+  [UpgradeType.STEEL_ARROWS]: { gold: 150, wood: 150, time: 15000 },
+  [UpgradeType.LEATHER_ARMOR]: { gold: 100, wood: 100, time: 20000 },
+  [UpgradeType.PLATE_ARMOR]: { gold: 250, wood: 200, time: 30000 },
 };
 
 export const UNIT_STATS = {
@@ -24,6 +30,7 @@ export const UNIT_STATS = {
   [BuildingType.BARRACKS]: { hp: 800, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8 },
   [BuildingType.FARM]: { hp: 400, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 6 },
   [BuildingType.TOWER]: { hp: 600, damage: 30, speed: 0, range: 15.0, attackSpeed: 1000, visionRange: 16 },
+  [BuildingType.BLACKSMITH]: { hp: 700, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 6 },
   
   // Resources
   'Gold': { hp: 10000, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 0 },
