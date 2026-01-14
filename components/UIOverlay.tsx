@@ -21,7 +21,7 @@ import {
   Hand
 } from 'lucide-react';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, UpgradeType } from '../types';
-import { COSTS, UNIT_STATS } from '../constants';
+import { COSTS, UNIT_STATS, MAP_SIZE } from '../constants';
 
 interface UIOverlayProps {
   gameState: GameState;
@@ -31,6 +31,8 @@ interface UIOverlayProps {
   onGetLore: (entity: Entity) => void;
   onGetAdvisor: () => void;
   onCommand: (cmd: 'ATTACK_MOVE' | 'STOP' | 'HOLD' | 'PATROL') => void;
+  onMinimapClick: (u: number, v: number) => void;
+  onMinimapCommand: (u: number, v: number) => void;
 }
 
 const Portrait = ({ type }: { type: string }) => {
@@ -60,12 +62,34 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   onBuild,
   onGetLore,
   onGetAdvisor,
-  onCommand
+  onCommand,
+  onMinimapClick,
+  onMinimapCommand
 }) => {
   // Logic for displaying selection
   const selectedCount = gameState.selection.length;
   const primarySelectionId = gameState.selection[0];
   const selectedEntity = gameState.entities.find(e => e.id === primarySelectionId);
+
+  const handleMinimapInteraction = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const u = (e.clientX - rect.left) / rect.width;
+    const v = (e.clientY - rect.top) / rect.height;
+    
+    // Invert Y logic if needed? 
+    // World coordinates: +Z is "down" in 2D map usually, but in ThreeJS +Z is towards camera.
+    // Minimap Rendering logic below uses `(position.z + MAP_SIZE/2)`.
+    // So 0,0 is at u=0.5, v=0.5.
+    // We pass U,V 0..1
+    
+    if (e.button === 2) {
+        onMinimapCommand(u, v);
+    } else {
+        onMinimapClick(u, v);
+    }
+  };
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between font-ui text-white">
@@ -145,18 +169,22 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
       {/* Bottom: Action Panel & Minimap */}
       <div className="h-48 bg-wood-900 border-t-4 border-gold-600 flex pointer-events-auto">
         
-        {/* Minimap Placeholder */}
-        <div className="w-48 h-full bg-black border-r-4 border-wood-800 relative overflow-hidden">
-            <div className="absolute inset-0 bg-green-900 opacity-50"></div>
+        {/* Interactive Minimap */}
+        <div 
+            className="w-48 h-full bg-black border-r-4 border-wood-800 relative overflow-hidden cursor-crosshair"
+            onPointerDown={(e) => handleMinimapInteraction(e)}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
+            <div className="absolute inset-0 bg-green-900 opacity-50 pointer-events-none"></div>
             {gameState.entities.map(e => {
                 if (!e.visible) return null;
                 return (
                     <div 
                         key={e.id}
-                        className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2 ${e.selected ? 'ring-2 ring-white z-10' : ''}`}
+                        className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2 pointer-events-none ${e.selected ? 'ring-2 ring-white z-10' : ''}`}
                         style={{
-                            left: `${(e.position.x + 50) / 100 * 100}%`,
-                            top: `${(e.position.z + 50) / 100 * 100}%`,
+                            left: `${(e.position.x + (MAP_SIZE/2)) / MAP_SIZE * 100}%`,
+                            top: `${(e.position.z + (MAP_SIZE/2)) / MAP_SIZE * 100}%`,
                             backgroundColor: e.type === EntityType.RESOURCE ? 'gold' : (e.faction === Faction.PLAYER ? '#3b82f6' : '#ef4444')
                         }}
                     />

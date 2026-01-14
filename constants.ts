@@ -1,6 +1,9 @@
 
 import { UnitType, BuildingType, UpgradeType } from './types';
 
+export const MAX_WAVES = 10;
+export const MAP_SIZE = 120;
+
 export const COSTS = {
   [UnitType.PEASANT]: { gold: 50, wood: 0, food: 1, time: 2000 },
   [UnitType.FOOTMAN]: { gold: 120, wood: 20, food: 2, time: 4000 },

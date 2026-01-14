@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { GameScene } from './components/GameScene';
 import { UIOverlay } from './components/UIOverlay';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType, UpgradeType } from './types';
-import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE } from './constants';
+import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE, MAX_WAVES, MAP_SIZE } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
 const INITIAL_ENTITIES: Entity[] = [
@@ -35,8 +35,16 @@ export default function App() {
     placementMode: { active: false, type: null, cost: { gold: 0, wood: 0 } },
     commandMode: { active: false, type: null },
     gameOver: false,
+    gameWon: false,
     wave: 1,
-    upgrades: {} as Record<UpgradeType, boolean>
+    upgrades: {} as Record<UpgradeType, boolean>,
+    stats: {
+        unitsTrained: 0,
+        unitsLost: 0,
+        enemiesKilled: 0,
+        resourcesGathered: { gold: 0, wood: 0 },
+        timeElapsed: 0
+    }
   });
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
@@ -526,6 +534,19 @@ export default function App() {
       }
   };
 
+  const handleMinimapClick = (u: number, v: number) => {
+    // Convert UV (0-1) to World Coords (-60 to 60)
+    const x = (u * MAP_SIZE) - (MAP_SIZE / 2);
+    const z = (v * MAP_SIZE) - (MAP_SIZE / 2);
+    setCameraTarget(new THREE.Vector3(x, 0, z));
+  };
+
+  const handleMinimapCommand = (u: number, v: number) => {
+    const x = (u * MAP_SIZE) - (MAP_SIZE / 2);
+    const z = (v * MAP_SIZE) - (MAP_SIZE / 2);
+    handleRightClickGround(new THREE.Vector3(x, 0, z));
+  };
+
   // --- GAME LOOP ---
   useEffect(() => {
     const interval = setInterval(() => {
@@ -539,10 +560,15 @@ export default function App() {
             let newProjectiles = [...prev.projectiles];
             let newFloatingTexts = [...prev.floatingTexts];
             let newUpgrades = { ...prev.upgrades };
+            let newStats = { ...prev.stats };
             let hasChanges = false;
             let currentWave = prev.wave;
+            let gameOver = false;
+            let gameWon = false;
 
             const delta = 1000/30; // approx ms per frame
+            const deltaSeconds = delta / 1000;
+            newStats.timeElapsed += deltaSeconds;
 
             // Helper for Stats with Upgrades
             const getStats = (type: UnitType | BuildingType) => {
@@ -564,32 +590,34 @@ export default function App() {
             };
 
             // 1. WAVE LOGIC
-            waveTimerRef.current += 1/30;
+            waveTimerRef.current += deltaSeconds;
             if (waveTimerRef.current >= nextWaveTimeRef.current) {
-                waveTimerRef.current = 0;
-                currentWave++;
-                const spawnCount = Math.floor(currentWave * 1.5) + 1;
-                messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
-                
-                for(let i=0; i<spawnCount; i++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const r = 50;
-                    const spawnPos = { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r };
-                    newEntities.push({
-                         id: uuidv4(),
-                         type: EntityType.UNIT,
-                         subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, 
-                         faction: Faction.ENEMY,
-                         position: spawnPos,
-                         hp: 420,
-                         maxHp: 420,
-                         state: 'idle',
-                         name: 'Invader',
-                         lastAttackTime: 0,
-                         visible: false
-                    });
+                if (currentWave < MAX_WAVES) {
+                    waveTimerRef.current = 0;
+                    currentWave++;
+                    const spawnCount = Math.floor(currentWave * 2) + 1;
+                    messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
+                    
+                    for(let i=0; i<spawnCount; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = 50;
+                        const spawnPos = { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r };
+                        newEntities.push({
+                            id: uuidv4(),
+                            type: EntityType.UNIT,
+                            subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, 
+                            faction: Faction.ENEMY,
+                            position: spawnPos,
+                            hp: 420,
+                            maxHp: 420,
+                            state: 'idle',
+                            name: 'Invader',
+                            lastAttackTime: 0,
+                            visible: false
+                        });
+                    }
+                    hasChanges = true;
                 }
-                hasChanges = true;
             }
 
             // 2. PRODUCTION QUEUES
@@ -620,6 +648,8 @@ export default function App() {
                                 lastAttackTime: 0,
                                 visible: true,
                             };
+                            
+                            newStats.unitsTrained++;
 
                             // Check Rally Point
                             if (e.rallyPoint) {
@@ -712,14 +742,9 @@ export default function App() {
                 let pos = { ...entity.position };
                 const stats = getStats(entity.subType as UnitType);
 
-                // Update MaxHP dynamically if upgrade just finished (simple check: if current maxHp < stats.maxHp)
-                // Note: This logic runs every frame, but stats.hp is constant unless upgrade changes. 
-                // We update maxHp but not current HP to simulate "cap increase".
+                // Update MaxHP dynamically if upgrade just finished
                 if (entity.faction === Faction.PLAYER && entity.type === EntityType.UNIT) {
                     if (entity.maxHp < stats.hp) {
-                         // Upgrade applied, heal the difference? Or just raise cap? 
-                         // Standard: Raise cap, percentage stays same OR amount stays same. 
-                         // Simplest for now: Raise cap, keep current HP (so they look damaged).
                          hasChanges = true;
                          return { ...entity, maxHp: stats.hp };
                     }
@@ -941,8 +966,14 @@ export default function App() {
                          pos.z += (dz/dist) * speed;
                          return { ...entity, position: pos };
                      } else {
-                         if (entity.carryType === ResourceType.GOLD) newResources.gold += (entity.carryAmount || 0);
-                         if (entity.carryType === ResourceType.WOOD) newResources.wood += (entity.carryAmount || 0);
+                         if (entity.carryType === ResourceType.GOLD) {
+                             newResources.gold += (entity.carryAmount || 0);
+                             newStats.resourcesGathered.gold += (entity.carryAmount || 0);
+                         }
+                         if (entity.carryType === ResourceType.WOOD) {
+                             newResources.wood += (entity.carryAmount || 0);
+                             newStats.resourcesGathered.wood += (entity.carryAmount || 0);
+                         }
                          newFloatingTexts.push({ id: uuidv4(), text: `+${entity.carryAmount}`, position: {x: pos.x, y: 3, z: pos.z}, color: '#fbbf24', life: 1 });
                          hasChanges = true;
                          if (entity.lastResourceId) {
@@ -1030,18 +1061,35 @@ export default function App() {
                 let newHp = e.hp;
                 if (damageMap[e.id]) newHp -= damageMap[e.id];
                 if (resourceMap[e.id]) newHp -= resourceMap[e.id]; 
+                
+                // Track Stats
+                if (newHp <= 0 && e.hp > 0) {
+                     if (e.faction === Faction.PLAYER && e.type === EntityType.UNIT) newStats.unitsLost++;
+                     if (e.faction === Faction.ENEMY && e.type === EntityType.UNIT) newStats.enemiesKilled++;
+                }
+                
                 return { ...e, hp: newHp };
             });
 
             const survivingEntities = newEntities.filter(e => e.hp > 0);
+            
+            // Check Victory (End of Final Wave)
+            if (currentWave === MAX_WAVES && survivingEntities.filter(e => e.faction === Faction.ENEMY).length === 0) {
+                 gameOver = true;
+                 gameWon = true;
+            }
+
+            // Check Defeat
             const townHall = survivingEntities.find(e => e.subType === BuildingType.TOWN_HALL && e.faction === Faction.PLAYER);
-            let gameOver = false;
             if (!townHall && !prev.gameOver) {
                 messages.push({ id: uuidv4(), text: 'The Kingdom has fallen! Game Over.', type: 'alert', timestamp: Date.now() });
                 gameOver = true;
+                gameWon = false;
             }
+            
             if (survivingEntities.length !== prev.entities.length) hasChanges = true;
             if (JSON.stringify(newUpgrades) !== JSON.stringify(prev.upgrades)) hasChanges = true;
+            if (newStats.timeElapsed !== prev.stats.timeElapsed) hasChanges = true;
 
             newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
             if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
@@ -1057,9 +1105,11 @@ export default function App() {
                 floatingTexts: newFloatingTexts,
                 wave: currentWave,
                 gameOver,
+                gameWon,
                 messages,
                 selection: newSelection,
-                upgrades: newUpgrades
+                upgrades: newUpgrades,
+                stats: newStats
             } : prev;
         });
     }, 1000 / 30); 
@@ -1098,10 +1148,43 @@ export default function App() {
           }} />
       )}
       {gameState.gameOver && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 text-white flex-col">
-              <h1 className="text-6xl font-fantasy text-red-500 mb-4">DEFEAT</h1>
-              <p className="text-xl">The Realm of Aethelgard is lost.</p>
-              <button onClick={() => window.location.reload()} className="mt-8 px-6 py-2 border border-white hover:bg-white hover:text-black">Restart</button>
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 text-white flex-col">
+              <h1 className={`text-6xl font-fantasy mb-4 ${gameState.gameWon ? 'text-green-500' : 'text-red-500'}`}>
+                  {gameState.gameWon ? 'VICTORY' : 'DEFEAT'}
+              </h1>
+              <p className="text-xl mb-8 font-ui">
+                  {gameState.gameWon 
+                    ? "The realm is safe. You have conquered the darkness." 
+                    : "The Realm of Aethelgard has fallen."}
+              </p>
+              
+              {/* Stats Table */}
+              <div className="grid grid-cols-2 gap-x-12 gap-y-4 text-gray-300 font-ui mb-8 text-sm">
+                   <div className="text-right text-gray-500">Time Survived:</div>
+                   <div className="text-left font-bold text-white">{Math.floor(gameState.stats.timeElapsed)}s</div>
+                   
+                   <div className="text-right text-gray-500">Enemies Vanquished:</div>
+                   <div className="text-left font-bold text-red-400">{gameState.stats.enemiesKilled}</div>
+                   
+                   <div className="text-right text-gray-500">Units Trained:</div>
+                   <div className="text-left font-bold text-blue-400">{gameState.stats.unitsTrained}</div>
+                   
+                   <div className="text-right text-gray-500">Units Lost:</div>
+                   <div className="text-left font-bold text-gray-400">{gameState.stats.unitsLost}</div>
+                   
+                   <div className="text-right text-gray-500">Gold Gathered:</div>
+                   <div className="text-left font-bold text-gold-400">{gameState.stats.resourcesGathered.gold}</div>
+
+                   <div className="text-right text-gray-500">Wood Gathered:</div>
+                   <div className="text-left font-bold text-green-400">{gameState.stats.resourcesGathered.wood}</div>
+              </div>
+
+              <button 
+                onClick={() => window.location.reload()} 
+                className="px-8 py-3 bg-stone-800 border border-gold-500 hover:bg-gold-600 hover:text-black hover:border-white transition-all font-fantasy uppercase tracking-widest"
+              >
+                Restart Chronicle
+              </button>
           </div>
       )}
       <UIOverlay 
@@ -1112,6 +1195,8 @@ export default function App() {
         onGetLore={handleLore}
         onGetAdvisor={handleAdvisor}
         onCommand={handleCommand}
+        onMinimapClick={handleMinimapClick}
+        onMinimapCommand={handleMinimapCommand}
       />
     </div>
   );

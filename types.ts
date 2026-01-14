@@ -1,4 +1,5 @@
 
+
 export enum EntityType {
   UNIT = 'UNIT',
   BUILDING = 'BUILDING',
@@ -115,6 +116,14 @@ export interface CommandMode {
   type: 'ATTACK_MOVE' | 'PATROL' | null;
 }
 
+export interface GameStats {
+  unitsTrained: number;
+  unitsLost: number;
+  enemiesKilled: number;
+  resourcesGathered: { gold: number; wood: number };
+  timeElapsed: number;
+}
+
 export interface GameState {
   resources: {
     gold: number;
@@ -131,8 +140,10 @@ export interface GameState {
   placementMode: PlacementMode;
   commandMode: CommandMode;
   gameOver: boolean;
+  gameWon: boolean;
   wave: number;
   upgrades: Record<string, boolean>; // Key is UpgradeType value
+  stats: GameStats;
 }
 
 export interface LogMessage {
