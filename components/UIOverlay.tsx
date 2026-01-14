@@ -120,17 +120,20 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         {/* Minimap Placeholder */}
         <div className="w-48 h-full bg-black border-r-4 border-wood-800 relative overflow-hidden">
             <div className="absolute inset-0 bg-green-900 opacity-50"></div>
-            {gameState.entities.map(e => (
-                <div 
-                    key={e.id}
-                    className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2 ${e.selected ? 'ring-2 ring-white z-10' : ''}`}
-                    style={{
-                        left: `${(e.position.x + 50) / 100 * 100}%`,
-                        top: `${(e.position.z + 50) / 100 * 100}%`,
-                        backgroundColor: e.type === EntityType.RESOURCE ? 'gold' : (e.faction === 'Player' ? '#3b82f6' : '#ef4444')
-                    }}
-                />
-            ))}
+            {gameState.entities.map(e => {
+                if (!e.visible) return null;
+                return (
+                    <div 
+                        key={e.id}
+                        className={`absolute w-2 h-2 rounded-full transform -translate-x-1/2 -translate-y-1/2 ${e.selected ? 'ring-2 ring-white z-10' : ''}`}
+                        style={{
+                            left: `${(e.position.x + 50) / 100 * 100}%`,
+                            top: `${(e.position.z + 50) / 100 * 100}%`,
+                            backgroundColor: e.type === EntityType.RESOURCE ? 'gold' : (e.faction === 'Player' ? '#3b82f6' : '#ef4444')
+                        }}
+                    />
+                );
+            })}
         </div>
 
         {/* Selection Info */}

@@ -47,6 +47,7 @@ export interface Entity {
   targetId?: string | null; // ID of entity being targeted (attack/gather)
   targetPos?: Position | null; // Movement destination
   state?: 'idle' | 'moving' | 'gathering' | 'attacking' | 'returning';
+  visible?: boolean; // Fog of War visibility status
   
   // Economy
   resourceAmount?: number;

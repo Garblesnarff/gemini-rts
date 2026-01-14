@@ -9,21 +9,17 @@ import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, Resourc
 import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
-// Initial World Setup
 const INITIAL_ENTITIES: Entity[] = [
-  // Player Base
-  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0 },
-  { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0 },
+  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0, visible: true },
+  { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0, visible: true },
   
-  // Resources
-  { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine', lastAttackTime: 0 },
-  { id: 'tr-1', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -8, y: 0, z: -8 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Ancient Oak', lastAttackTime: 0 },
-  { id: 'tr-2', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -10, y: 0, z: -6 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Pine Tree', lastAttackTime: 0 },
-  { id: 'tr-3', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -12, y: 0, z: -9 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Birch', lastAttackTime: 0 },
+  { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
+  { id: 'tr-1', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -8, y: 0, z: -8 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Ancient Oak', lastAttackTime: 0, visible: true },
+  { id: 'tr-2', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -10, y: 0, z: -6 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Pine Tree', lastAttackTime: 0, visible: true },
+  { id: 'tr-3', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -12, y: 0, z: -9 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Birch', lastAttackTime: 0, visible: true },
   
-  // More resources
-  { id: 'tr-4', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -15, y: 0, z: 10 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0 },
-  { id: 'tr-5', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: 15, y: 0, z: 12 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0 },
+  { id: 'tr-4', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -15, y: 0, z: 10 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0, visible: true },
+  { id: 'tr-5', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: 15, y: 0, z: 12 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0, visible: true },
 ];
 
 export default function App() {
@@ -40,7 +36,7 @@ export default function App() {
   });
 
   const waveTimerRef = useRef(0);
-  const nextWaveTimeRef = useRef(60); // Seconds until next wave
+  const nextWaveTimeRef = useRef(60);
 
   const addMessage = (text: string, type: 'info' | 'alert' | 'lore' = 'info') => {
     setGameState(prev => ({
@@ -49,21 +45,16 @@ export default function App() {
     }));
   };
 
-  const spawnFloatingText = (text: string, pos: {x:number, y:number, z:number}, color: string) => {
-      setGameState(prev => ({
-          ...prev,
-          floatingTexts: [...prev.floatingTexts, { id: uuidv4(), text, position: pos, color, life: 1.0 }]
-      }));
-  };
-
-  // --- Actions ---
-
   const handleSelectEntity = (ids: string[], multi: boolean) => {
     if (gameState.placementMode.active) return; 
 
     setGameState(prev => {
-        let newSelection = multi ? [...prev.selection, ...ids] : ids;
-        // Unique
+        const visibleIds = ids.filter(id => {
+            const ent = prev.entities.find(e => e.id === id);
+            return ent && ent.visible;
+        });
+
+        let newSelection = multi ? [...prev.selection, ...visibleIds] : visibleIds;
         newSelection = [...new Set(newSelection)];
 
         return {
@@ -78,7 +69,6 @@ export default function App() {
   };
 
   const handleRightClickGround = (point: THREE.Vector3) => {
-    // Cancel placement if active
     if (gameState.placementMode.active) {
         setGameState(prev => ({ ...prev, placementMode: { active: false, type: null, cost: {gold:0, wood:0} } }));
         addMessage("Building cancelled.");
@@ -109,7 +99,7 @@ export default function App() {
   const handleRightClickEntity = (targetId: string) => {
     setGameState(prev => {
       const target = prev.entities.find(e => e.id === targetId);
-      if (!target) return prev;
+      if (!target || !target.visible) return prev;
       
       let actionTriggered = false;
 
@@ -124,7 +114,7 @@ export default function App() {
                 return { ...e, state: 'gathering', targetId: target.id, targetPos: null, lastResourceId: target.id };
             }
             actionTriggered = true;
-            return { ...e, state: 'moving', targetPos: target.position, targetId: null }; // Follow
+            return { ...e, state: 'moving', targetPos: target.position, targetId: null };
           }
           return e;
       });
@@ -142,7 +132,6 @@ export default function App() {
       if (!active || !type) return;
 
       if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
-          // Find a builder (Peasant)
           const peasantId = gameState.selection.find(id => {
               const ent = gameState.entities.find(e => e.id === id);
               return ent && ent.subType === UnitType.PEASANT;
@@ -155,10 +144,11 @@ export default function App() {
                 subType: type,
                 faction: Faction.PLAYER,
                 position: { x: pos.x, y: 0, z: pos.z },
-                hp: 10, // Start low HP and build up? MVP: Instant
-                maxHp: UNIT_STATS[type].hp || 500,
+                hp: UNIT_STATS[type].hp,
+                maxHp: UNIT_STATS[type].hp,
                 name: type,
-                lastAttackTime: 0
+                lastAttackTime: 0,
+                visible: true
               };
               
               setGameState(prev => ({
@@ -168,7 +158,7 @@ export default function App() {
                       gold: prev.resources.gold - cost.gold,
                       wood: prev.resources.wood - cost.wood
                   },
-                  entities: [...prev.entities, { ...newBuilding, hp: newBuilding.maxHp }], 
+                  entities: [...prev.entities, newBuilding],
                   placementMode: { active: false, type: null, cost: {gold:0, wood:0} }
               }));
               addMessage(`Construction of ${type} complete!`);
@@ -218,7 +208,8 @@ export default function App() {
                        maxHp: UNIT_STATS[type].hp,
                        state: 'idle',
                        name: `${type}`,
-                       lastAttackTime: 0
+                       lastAttackTime: 0,
+                       visible: true
                    };
                    return {
                        ...prev,
@@ -253,7 +244,6 @@ export default function App() {
       addMessage(tip, 'lore');
   }
 
-  // --- Game Loop (Simulation) ---
   useEffect(() => {
     const interval = setInterval(() => {
         setGameState(prev => {
@@ -268,7 +258,6 @@ export default function App() {
             let hasChanges = false;
             let currentWave = prev.wave;
 
-            // 1. Wave Spawner Logic
             waveTimerRef.current += 1/30;
             if (waveTimerRef.current >= nextWaveTimeRef.current) {
                 waveTimerRef.current = 0;
@@ -283,35 +272,54 @@ export default function App() {
                     newEntities.push({
                          id: uuidv4(),
                          type: EntityType.UNIT,
-                         subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, // Mix units later
+                         subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, 
                          faction: Faction.ENEMY,
                          position: spawnPos,
                          hp: 420,
                          maxHp: 420,
                          state: 'idle',
                          name: 'Invader',
-                         lastAttackTime: 0
+                         lastAttackTime: 0,
+                         visible: false
                     });
                 }
                 hasChanges = true;
             }
 
-            // 2. Projectile Physics
+            const playerEntities = newEntities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
+            
+            newEntities = newEntities.map(entity => {
+                if (entity.faction === Faction.PLAYER) {
+                    return { ...entity, visible: true };
+                } else {
+                    let isVisible = false;
+                    for (const p of playerEntities) {
+                        const stats = UNIT_STATS[p.subType as keyof typeof UNIT_STATS];
+                        const range = stats?.visionRange || 8;
+                        const dx = entity.position.x - p.position.x;
+                        const dz = entity.position.z - p.position.z;
+                        // Use a slightly larger check here to ensure they pop in smoothly with the shader
+                        if (dx*dx + dz*dz < (range + 0.5) * (range + 0.5)) {
+                            isVisible = true;
+                            break;
+                        }
+                    }
+                    if (entity.visible !== isVisible) {
+                        hasChanges = true;
+                        return { ...entity, visible: isVisible };
+                    }
+                    return entity;
+                }
+            });
+
             newProjectiles = newProjectiles.map(p => {
                 const target = prev.entities.find(e => e.id === p.targetId);
-                if (!target) return { ...p, progress: 2 }; // Mark for deletion
-
-                const speed = 0.05; // Projectile speed
+                if (!target) return { ...p, progress: 2 }; 
+                const speed = 0.05; 
                 const nextProgress = p.progress + speed;
-                
-                if (nextProgress >= 1) {
-                   // HIT
-                   return { ...p, progress: 1 }; // Will be cleaned up
-                }
                 return { ...p, progress: nextProgress };
             });
 
-            // Projectile Damage & Cleanup
             const hitProjectiles = newProjectiles.filter(p => p.progress >= 1);
             newProjectiles = newProjectiles.filter(p => p.progress < 1);
             if (hitProjectiles.length > 0 || newProjectiles.length !== prev.projectiles.length) hasChanges = true;
@@ -319,14 +327,12 @@ export default function App() {
             const damageMap: Record<string, number> = {};
             hitProjectiles.forEach(p => {
                 damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
-                // Add floating text
                 const t = prev.entities.find(e => e.id === p.targetId);
-                if (t) {
+                if (t && t.visible) {
                     newFloatingTexts.push({ id: uuidv4(), text: `-${p.damage}`, position: { ...t.position }, color: '#ef4444', life: 1 });
                 }
             });
 
-            // 3. Entity Logic
             const resourceMap: Record<string, number> = {}; 
 
             newEntities = newEntities.map(entity => {
@@ -335,12 +341,10 @@ export default function App() {
                 let pos = { ...entity.position };
                 const stats = UNIT_STATS[entity.subType as UnitType] || UNIT_STATS[UnitType.PEASANT];
 
-                // Collision Avoidance (Separation)
-                if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking')) {
+                if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking' || entity.state === 'gathering' || entity.state === 'returning')) {
                     const separationRadius = 1.0;
                     let moveX = 0, moveZ = 0;
                     let count = 0;
-                    
                     prev.entities.forEach(other => {
                         if (entity.id !== other.id && other.type === EntityType.UNIT) {
                             const dx = entity.position.x - other.position.x;
@@ -348,13 +352,12 @@ export default function App() {
                             const dSq = dx*dx + dz*dz;
                             if (dSq < separationRadius * separationRadius && dSq > 0.001) {
                                 const d = Math.sqrt(dSq);
-                                moveX += (dx / d) / d; // Weight by inverse distance
+                                moveX += (dx / d) / d;
                                 moveZ += (dz / d) / d;
                                 count++;
                             }
                         }
                     });
-
                     if (count > 0) {
                         const pushStrength = 0.05;
                         pos.x += moveX * pushStrength;
@@ -363,15 +366,10 @@ export default function App() {
                     }
                 }
 
-                // AI & State Logic
-                
-                // --- Enemy Aggro ---
                 if (entity.faction === Faction.ENEMY && entity.type === EntityType.UNIT) {
                     if (entity.state === 'idle' || (entity.state === 'moving' && !entity.targetId)) {
                         let closest = null;
                         let minDst = Infinity;
-                        
-                        // Prioritize buildings then units
                         for (const other of prev.entities) {
                             if (other.faction === Faction.PLAYER) {
                                 const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
@@ -381,28 +379,24 @@ export default function App() {
                                 }
                             }
                         }
-                        
-                        if (closest && minDst < 30) { // Aggro range
+                        if (closest && minDst < 12) {
                              hasChanges = true;
                              return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null, position: pos };
                         } else if (!entity.targetPos && !closest) {
                              hasChanges = true;
-                             return { ...entity, state: 'moving', targetPos: {x:0,y:0,z:0}, position: pos }; // March to center
+                             return { ...entity, state: 'moving', targetPos: {x:0,y:0,z:0}, position: pos }; 
                         }
                     }
                 }
                 
-                // --- Tower Logic ---
                 if (entity.subType === BuildingType.TOWER && entity.faction === Faction.PLAYER) {
-                    // Look for enemies
                     if (now - entity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
                          const target = prev.entities.find(e => {
-                             if (e.faction !== Faction.ENEMY) return false;
+                             if (e.faction !== Faction.ENEMY || !e.visible) return false;
                              const d = Math.sqrt(Math.pow(entity.position.x - e.position.x, 2) + Math.pow(entity.position.z - e.position.z, 2));
                              return d <= range;
                          });
-                         
                          if (target) {
                              newProjectiles.push({
                                  id: uuidv4(),
@@ -418,13 +412,11 @@ export default function App() {
                     }
                 }
 
-                // --- Movement ---
                 if (entity.state === 'moving' && entity.targetPos) {
                     const dx = entity.targetPos.x - pos.x;
                     const dz = entity.targetPos.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     const speed = (stats.speed || 3) * TICK_SPEED;
-
                     if (dist < 0.5) {
                         hasChanges = true;
                         return { ...entity, state: 'idle', targetPos: null, position: pos };
@@ -436,7 +428,6 @@ export default function App() {
                     }
                 }
 
-                // --- Gathering ---
                 if (entity.state === 'gathering') {
                     if ((entity.carryAmount || 0) >= CARRY_CAPACITY) {
                         const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
@@ -446,7 +437,6 @@ export default function App() {
                         }
                         return { ...entity, state: 'idle', position: pos };
                     }
-
                     const target = prev.entities.find(t => t.id === entity.targetId);
                     if (!target || target.hp <= 0) {
                          if ((entity.carryAmount || 0) > 0) {
@@ -458,11 +448,9 @@ export default function App() {
                         }
                         return { ...entity, state: 'idle', position: pos };
                     }
-
                     const dx = target.position.x - pos.x;
                     const dz = target.position.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
-                    
                     if (dist > 2.5) {
                          const speed = (stats.speed || 2.5) * TICK_SPEED;
                          hasChanges = true;
@@ -470,34 +458,25 @@ export default function App() {
                          pos.z += (dz/dist) * speed;
                          return { ...entity, position: pos };
                     } else {
-                        // Work
                         if (Math.random() > 0.90) { 
                             const gatherAmount = 1;
                             resourceMap[target.id] = (resourceMap[target.id] || 0) + gatherAmount;
                             hasChanges = true;
-                            return { 
-                                ...entity, 
-                                position: pos,
-                                carryAmount: (entity.carryAmount || 0) + gatherAmount,
-                                carryType: target.subType as ResourceType
-                            };
+                            return { ...entity, position: pos, carryAmount: (entity.carryAmount || 0) + gatherAmount, carryType: target.subType as ResourceType };
                         }
                         return { ...entity, position: pos };
                     }
                 }
 
-                // --- Returning Logic ---
                 if (entity.state === 'returning') {
                      const townHall = prev.entities.find(t => t.id === entity.targetId);
                      if (!townHall) {
                          hasChanges = true;
                          return { ...entity, state: 'idle', position: pos };
                      }
-
                      const dx = townHall.position.x - pos.x;
                      const dz = townHall.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
-
                      if (dist > 4.0) { 
                          const speed = (stats.speed || 2.5) * TICK_SPEED;
                          hasChanges = true;
@@ -505,42 +484,27 @@ export default function App() {
                          pos.z += (dz/dist) * speed;
                          return { ...entity, position: pos };
                      } else {
-                         // Deposit
                          if (entity.carryType === ResourceType.GOLD) newResources.gold += (entity.carryAmount || 0);
                          if (entity.carryType === ResourceType.WOOD) newResources.wood += (entity.carryAmount || 0);
-                         
-                         // Visual pop
                          newFloatingTexts.push({ id: uuidv4(), text: `+${entity.carryAmount}`, position: {x: pos.x, y: 3, z: pos.z}, color: '#fbbf24', life: 1 });
-
                          hasChanges = true;
-
                          if (entity.lastResourceId) {
-                             return { 
-                                 ...entity, 
-                                 position: pos,
-                                 state: 'gathering', 
-                                 targetId: entity.lastResourceId, 
-                                 carryAmount: 0, 
-                                 carryType: undefined 
-                             };
+                             return { ...entity, position: pos, state: 'gathering', targetId: entity.lastResourceId, carryAmount: 0, carryType: undefined };
                          }
                          return { ...entity, state: 'idle', carryAmount: 0, carryType: undefined, position: pos };
                      }
                 }
                 
-                // --- Attacking ---
                 if (entity.state === 'attacking' && entity.targetId) {
                      const target = prev.entities.find(t => t.id === entity.targetId);
-                     if (!target || target.hp <= 0) {
+                     if (!target || target.hp <= 0 || !target.visible) {
                          hasChanges = true;
                          return { ...entity, state: 'idle', position: pos };
                      }
-                     
                      const dx = target.position.x - pos.x;
                      const dz = target.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
                      const range = stats.range || 2;
-
                      if (dist > range) {
                          const speed = (stats.speed || 3) * TICK_SPEED;
                          hasChanges = true;
@@ -548,14 +512,10 @@ export default function App() {
                          pos.z += (dz/dist) * speed;
                          return { ...entity, position: pos };
                      } else {
-                         // Attack Cooldown
                          if (now - entity.lastAttackTime > stats.attackSpeed) {
                              hasChanges = true;
                              const dmg = stats.damage || 5;
-
-                             // Ranged?
                              if (range > 3) {
-                                 // Fire Projectile
                                  newProjectiles.push({
                                      id: uuidv4(),
                                      startPos: { x: pos.x, y: 1.5, z: pos.z },
@@ -565,21 +525,19 @@ export default function App() {
                                      damage: dmg
                                  });
                              } else {
-                                 // Melee Immediate
                                  damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
-                                 newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
+                                 if (target.visible) {
+                                    newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
+                                 }
                              }
-
                              return { ...entity, lastAttackTime: now, position: pos };
                          }
                          return { ...entity, position: pos };
                      }
                 }
-
                 return { ...entity, position: pos };
             });
 
-            // 4. Apply Damages
             newEntities = newEntities.map(e => {
                 let newHp = e.hp;
                 if (damageMap[e.id]) newHp -= damageMap[e.id];
@@ -587,24 +545,16 @@ export default function App() {
                 return { ...e, hp: newHp };
             });
 
-            // 5. Cleanup Dead
             const survivingEntities = newEntities.filter(e => e.hp > 0);
-            
-            // Win/Loss
             const townHall = survivingEntities.find(e => e.subType === BuildingType.TOWN_HALL && e.faction === Faction.PLAYER);
             let gameOver = false;
-            
             if (!townHall && !prev.gameOver) {
                 messages.push({ id: uuidv4(), text: 'The Kingdom has fallen! Game Over.', type: 'alert', timestamp: Date.now() });
                 gameOver = true;
             }
-
             if (survivingEntities.length !== prev.entities.length) hasChanges = true;
-
-            // Update Floating Text life
             newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
             if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
-
             const newSelection = prev.selection.filter(id => survivingEntities.find(e => e.id === id));
             
             return hasChanges ? { 
@@ -620,10 +570,8 @@ export default function App() {
             } : prev;
         });
     }, 1000 / 30); 
-
     return () => clearInterval(interval);
   }, []);
-
 
   return (
     <div className="w-full h-full bg-black relative">
@@ -639,7 +587,6 @@ export default function App() {
             onPlaceBuilding={handlePlaceBuilding}
         />
       </Canvas>
-      
       {gameState.gameOver && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 text-white flex-col">
               <h1 className="text-6xl font-fantasy text-red-500 mb-4">DEFEAT</h1>
@@ -647,7 +594,6 @@ export default function App() {
               <button onClick={() => window.location.reload()} className="mt-8 px-6 py-2 border border-white hover:bg-white hover:text-black">Restart</button>
           </div>
       )}
-
       <UIOverlay 
         gameState={gameState} 
         onTrainUnit={handleTrainUnit}

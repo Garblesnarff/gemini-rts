@@ -1,9 +1,10 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Sky, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Entity, EntityType, BuildingType, PlacementMode, Projectile, FloatingText, Faction } from '../types';
 import { Unit3D, Building3D, Resource3D, Projectile3D, FloatingText3D } from './WorldEntities';
+import { UNIT_STATS } from '../constants';
 
 interface GameSceneProps {
   entities: Entity[];
@@ -23,17 +24,17 @@ const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> =
   return (
     <group position={position}>
       {isTower ? (
-        <mesh position={[0, 2, 0]}>
+        <mesh position={[0, 2, 0]} raycast={() => null}>
             <cylinderGeometry args={[0.8, 1.2, 4, 6]} />
             <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
         </mesh>
       ) : (
           <>
-            <mesh position={[0, 1, 0]}>
+            <mesh position={[0, 1, 0]} raycast={() => null}>
                 <boxGeometry args={[isTownHall ? 4 : 3, 2, isTownHall ? 4 : 3]} />
                 <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
             </mesh>
-            <mesh position={[0, 2.5, 0]}>
+            <mesh position={[0, 2.5, 0]} raycast={() => null}>
                 <coneGeometry args={[isTownHall ? 3 : 2.5, 2, 4]} rotation={[0, Math.PI/4, 0]} />
                 <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
             </mesh>
@@ -56,105 +57,110 @@ const ClickMarker: React.FC<{ position: THREE.Vector3, color?: string }> = ({ po
     if (opacity <= 0) return null;
 
     return (
-        <mesh position={[position.x, 0.2, position.z]} rotation={[-Math.PI/2, 0, 0]} scale={scale}>
+        <mesh position={[position.x, 0.2, position.z]} rotation={[-Math.PI/2, 0, 0]} scale={scale} raycast={() => null}>
             <ringGeometry args={[0.5, 0.7, 32]} />
             <meshBasicMaterial color={color} transparent opacity={opacity} />
         </mesh>
     );
 };
 
-// Controls Multi-Selection Logic
-const SelectionController = ({ active, onSelect }: { active: boolean, onSelect: (ids: string[]) => void }) => {
-    const { camera, scene, gl } = useThree();
-    const [startPos, setStartPos] = useState<{x: number, y: number} | null>(null);
-    const [curPos, setCurPos] = useState<{x: number, y: number} | null>(null);
-
-    useEffect(() => {
-        if (!active) return;
-
-        const handleMouseDown = (e: MouseEvent) => {
-            if (e.button !== 0) return; // Only Left Click
-            setStartPos({ x: e.clientX, y: e.clientY });
-            setCurPos({ x: e.clientX, y: e.clientY });
-        };
-
-        const handleMouseMove = (e: MouseEvent) => {
-            if (startPos) {
-                setCurPos({ x: e.clientX, y: e.clientY });
-            }
-        };
-
-        const handleMouseUp = (e: MouseEvent) => {
-            if (!startPos || !curPos) return;
-
-            // Calculate Box
-            const minX = Math.min(startPos.x, curPos.x);
-            const maxX = Math.max(startPos.x, curPos.x);
-            const minY = Math.min(startPos.y, curPos.y);
-            const maxY = Math.max(startPos.y, curPos.y);
-
-            // Simple click check (not a drag)
-            if (maxX - minX < 5 && maxY - minY < 5) {
-                setStartPos(null);
-                setCurPos(null);
-                return; 
-            }
-
-            // Find entities in box
-            const selectedIds: string[] = [];
-            
-            // Traverse scene for entities (Optimization: Pass entities as prop instead of traversing scene graph, but this works for MVP)
-            scene.traverse((object) => {
-                // We tagged our entity groups with userData in the main loop or just check proximity
-                // Better approach: Project entity positions
-            });
-
-            // Using the global event approach requires access to entities.
-            // Let's defer actual selection logic to the parent via coordinates if needed, 
-            // OR use Raycaster. For box selection, projecting World to Screen is best.
-            // Since we can't easily access the React state 'entities' inside this useEffect without deps,
-            // we will emit the BOX coordinates and let the parent handle the math, OR rely on a custom event.
-            
-            // Alternative: We do the math here if we had entities. 
-            // To keep it clean, let's use a specialized hook in the parent or pass entities here.
-            
-            setStartPos(null);
-            setCurPos(null);
-        };
-
-        // We attach to window to catch drags outside canvas
-        window.addEventListener('mousedown', handleMouseDown);
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-        return () => {
-            window.removeEventListener('mousedown', handleMouseDown);
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [active, startPos, curPos, scene, camera, onSelect]);
-
-    // Render the HTML Box
-    if (!startPos || !curPos) return null;
+const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
+    const GRID_SIZE = 128;
+    const WORLD_SIZE = 120;
     
-    const width = Math.abs(curPos.x - startPos.x);
-    const height = Math.abs(curPos.y - startPos.y);
-    const left = Math.min(curPos.x, startPos.x);
-    const top = Math.min(curPos.y, startPos.y);
+    const data = useMemo(() => new Uint8Array(GRID_SIZE * GRID_SIZE).fill(0), []);
+    const textureRef = useRef<THREE.DataTexture>(null);
+
+    const shaderMaterial = useMemo(() => new THREE.ShaderMaterial({
+        uniforms: {
+            uFogMap: { value: null }
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D uFogMap;
+            varying vec2 vUv;
+            void main() {
+                float v = texture2D(uFogMap, vUv).r;
+                float finalAlpha = 1.0;
+                if (v > 0.9) {
+                    finalAlpha = 0.0; // Visible
+                } else if (v > 0.4) {
+                    finalAlpha = 0.6; // Explored
+                }
+                gl_FragColor = vec4(0.0, 0.0, 0.0, finalAlpha);
+            }
+        `,
+        transparent: true,
+        depthWrite: false,
+    }), []);
+
+    useFrame(() => {
+        if (!textureRef.current) return;
+
+        // 1. Fade active vision to "Explored" (128)
+        for (let i = 0; i < data.length; i++) {
+            if (data[i] > 128) data[i] = 128; 
+        }
+
+        // 2. Project current vision from Player entities
+        const playerEntities = entities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
+        
+        playerEntities.forEach(e => {
+            const stats = UNIT_STATS[e.subType as keyof typeof UNIT_STATS];
+            const range = stats?.visionRange || 8;
+            
+            // X Mapping: -60 to 60 -> 0 to 127
+            const gridX = Math.floor(((e.position.x + 60) / 120) * (GRID_SIZE - 1));
+            
+            // Z Mapping FIX: Because of rotation -PI/2 on X, 
+            // UV.y=0 is at Z=60 and UV.y=1 is at Z=-60.
+            // So we use (60 - Z) to map correctly.
+            const gridY = Math.floor(((60 - e.position.z) / 120) * (GRID_SIZE - 1));
+            
+            const gridRange = Math.ceil((range / 120) * GRID_SIZE);
+
+            for (let y = -gridRange; y <= gridRange; y++) {
+                for (let x = -gridRange; x <= gridRange; x++) {
+                    if (x*x + y*y <= gridRange*gridRange) {
+                        const px = gridX + x;
+                        const py = gridY + y;
+                        if (px >= 0 && px < GRID_SIZE && py >= 0 && py < GRID_SIZE) {
+                            data[py * GRID_SIZE + px] = 255;
+                        }
+                    }
+                }
+            }
+        });
+
+        textureRef.current.needsUpdate = true;
+    });
 
     return (
-        <Html fullscreen style={{ pointerEvents: 'none', zIndex: 100 }}>
-            <div style={{
-                position: 'absolute',
-                left: left,
-                top: top,
-                width: width,
-                height: height,
-                border: '1px solid #00ff00',
-                backgroundColor: 'rgba(0, 255, 0, 0.2)',
-            }} />
-        </Html>
+        <mesh 
+            rotation={[-Math.PI / 2, 0, 0]} 
+            position={[0, 0.3, 0]} 
+            raycast={() => null}
+        >
+            <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
+            <primitive object={shaderMaterial} attach="material">
+                <dataTexture 
+                    ref={textureRef}
+                    attach="uniforms-uFogMap-value"
+                    args={[data, GRID_SIZE, GRID_SIZE, THREE.RedFormat, THREE.UnsignedByteType]}
+                    magFilter={THREE.LinearFilter}
+                    minFilter={THREE.LinearFilter}
+                />
+            </primitive>
+        </mesh>
     );
 };
+
 
 export const GameScene: React.FC<GameSceneProps> = ({ 
   entities, 
@@ -170,7 +176,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [marker, setMarker] = useState<{pos: THREE.Vector3, color: string, id: number} | null>(null);
   
-  // Selection State
   const [dragStart, setDragStart] = useState<THREE.Vector2 | null>(null);
   const [dragCurrent, setDragCurrent] = useState<THREE.Vector2 | null>(null);
   const { camera, size } = useThree();
@@ -191,7 +196,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
           setDragCurrent(new THREE.Vector2(e.clientX, e.clientY));
       }
       
-      // Ground hover for building placement
       if (e.intersections.length > 0) {
           const point = e.intersections[0].point;
            setHoverPos(new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z)));
@@ -205,7 +209,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
           const dist = Math.sqrt(dx*dx + dy*dy);
 
           if (dist > 10) {
-              // Box Selection
               const minX = Math.min(dragStart.x, dragCurrent.x);
               const maxX = Math.max(dragStart.x, dragCurrent.x);
               const minY = Math.min(dragStart.y, dragCurrent.y);
@@ -226,8 +229,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
               });
               onSelectEntity(selected, false);
           } else {
-              // Single Click (handled by entity onClick or Ground onClick)
-             // But if we clicked ground, clear selection
              if (e.object === groundRef.current) {
                  onSelectEntity([], false);
              }
@@ -248,9 +249,8 @@ export const GameScene: React.FC<GameSceneProps> = ({
         mouseButtons={{
           LEFT: THREE.MOUSE.PAN, 
           MIDDLE: THREE.MOUSE.ROTATE,
-          RIGHT: null // Free up Right Click
+          RIGHT: null
         }}
-        // Disable orbit controls while dragging selection box
         enabled={!dragStart}
       />
       
@@ -268,7 +268,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
       <Environment preset="park" />
       <Sky sunPosition={[100, 20, 100]} turbidity={0.5} rayleigh={0.5} />
 
-      {/* Terrain */}
       <mesh 
         ref={groundRef} 
         rotation={[-Math.PI / 2, 0, 0]} 
@@ -293,8 +292,9 @@ export const GameScene: React.FC<GameSceneProps> = ({
         <planeGeometry args={[120, 120]} />
         <meshStandardMaterial color="#4d7c0f" roughness={1} />
       </mesh>
+
+      <FogOfWarOverlay entities={entities} />
       
-      {/* Selection Box UI */}
       {dragStart && dragCurrent && (
           <Html fullscreen style={{ pointerEvents: 'none', zIndex: 100 }}>
               <div style={{
@@ -310,51 +310,48 @@ export const GameScene: React.FC<GameSceneProps> = ({
           </Html>
       )}
 
-      {/* Markers & Ghosts */}
       {marker && <ClickMarker key={marker.id} position={marker.pos} color={marker.color} />}
       
       {placementMode.active && placementMode.type && hoverPos && (
           <GhostBuilding type={placementMode.type} position={hoverPos} />
       )}
 
-      <gridHelper args={[120, 60, 0x000000, 0x000000]} position={[0, 0.01, 0]} rotation={[0,0,0]}>
+      <gridHelper args={[120, 60, 0x000000, 0x000000]} position={[0, 0.01, 0]} raycast={() => null}>
          <meshBasicMaterial attach="material" color="black" transparent opacity={0.1} />
       </gridHelper>
 
-      {/* Entities */}
       {entities.map(entity => (
         <group 
             key={entity.id} 
             onClick={(e) => {
                 e.stopPropagation();
-                // If in placement mode, do nothing (ground handles it)
-                if (!placementMode.active) {
+                if (!placementMode.active && entity.visible) {
                     onSelectEntity([entity.id], e.shiftKey);
                 }
             }}
             onContextMenu={(e) => {
                 e.stopPropagation();
                 e.nativeEvent.preventDefault();
-                spawnMarker(entity.position as any, '#ef4444');
-                onRightClickEntity(entity.id);
+                if (entity.visible) {
+                    spawnMarker(new THREE.Vector3(entity.position.x, entity.position.y, entity.position.z), '#ef4444');
+                    onRightClickEntity(entity.id);
+                }
             }}
-            onPointerOver={() => document.body.style.cursor = 'pointer'}
+            onPointerOver={() => { if(entity.visible) document.body.style.cursor = 'pointer'; }}
             onPointerOut={() => document.body.style.cursor = 'default'}
         >
-            {entity.type === EntityType.UNIT && <Unit3D entity={entity} />}
+            <Unit3D entity={entity} />
             {entity.type === EntityType.BUILDING && <Building3D entity={entity} />}
             {entity.type === EntityType.RESOURCE && <Resource3D entity={entity} />}
         </group>
       ))}
 
-      {/* Projectiles */}
       {projectiles.map(proj => {
           const target = entities.find(e => e.id === proj.targetId);
           if (!target) return null;
           return <Projectile3D key={proj.id} data={proj} startPos={proj.startPos} endPos={target.position} />;
       })}
 
-      {/* Floating Text */}
       {floatingTexts.map(ft => (
           <FloatingText3D key={ft.id} data={ft} />
       ))}
