@@ -1,8 +1,9 @@
+
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { Entity, UnitType, BuildingType, ResourceType, Faction, Projectile, FloatingText } from '../types';
+import { Entity, UnitType, BuildingType, ResourceType, Faction, Projectile, FloatingText, Position } from '../types';
 import { COLORS } from '../constants';
 
 interface EntityProps {
@@ -19,6 +20,28 @@ const HealthBar = ({ hp, maxHp }: { hp: number; maxHp: number }) => {
         />
       </div>
     </Html>
+  );
+};
+
+export const RallyPoint3D: React.FC<{ pos: Position }> = ({ pos }) => {
+  return (
+    <group position={[pos.x, 0, pos.z]}>
+      {/* Flag Pole */}
+      <mesh position={[0, 1, 0]}>
+        <cylinderGeometry args={[0.05, 0.05, 2]} />
+        <meshStandardMaterial color="#854d0e" />
+      </mesh>
+      {/* Flag Cloth */}
+      <mesh position={[0.4, 1.6, 0]} rotation={[0, 0, 0]}>
+         <boxGeometry args={[0.8, 0.5, 0.05]} />
+         <meshStandardMaterial color={COLORS.RALLY} />
+      </mesh>
+      {/* Base Ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.1, 0]}>
+          <ringGeometry args={[0.3, 0.4, 16]} />
+          <meshBasicMaterial color={COLORS.RALLY} opacity={0.6} transparent />
+      </mesh>
+    </group>
   );
 };
 

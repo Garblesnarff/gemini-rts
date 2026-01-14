@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React from 'react';
 import { 
   Coins, 
   Trees, 
@@ -14,7 +15,7 @@ import {
   Crosshair,
   TowerControl
 } from 'lucide-react';
-import { GameState, Entity, UnitType, BuildingType, EntityType } from '../types';
+import { GameState, Entity, UnitType, BuildingType, EntityType, Faction } from '../types';
 import { COSTS, UNIT_STATS } from '../constants';
 
 interface UIOverlayProps {
@@ -23,6 +24,7 @@ interface UIOverlayProps {
   onBuild: (type: BuildingType) => void;
   onGetLore: (entity: Entity) => void;
   onGetAdvisor: () => void;
+  onCommand: (cmd: 'ATTACK_MOVE') => void;
 }
 
 const Portrait = ({ type }: { type: string }) => {
@@ -49,7 +51,8 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   onTrainUnit, 
   onBuild,
   onGetLore,
-  onGetAdvisor
+  onGetAdvisor,
+  onCommand
 }) => {
   // Logic for displaying selection
   const selectedCount = gameState.selection.length;
@@ -96,6 +99,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               <span className="text-blue-100 font-bold uppercase tracking-widest">Select Ground to Build (Right Click Cancel)</span>
           </div>
       )}
+      {gameState.commandMode.active && (
+          <div className="w-full bg-red-900/80 text-center py-2 border-b border-red-500 animate-pulse">
+              <span className="text-red-100 font-bold uppercase tracking-widest">Select Target for Attack Move</span>
+          </div>
+      )}
 
       {/* Middle: Notifications/Messages */}
       <div className="flex-1 flex flex-col items-start justify-start p-4 space-y-2 overflow-hidden pointer-events-none">
@@ -108,9 +116,17 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
       {/* Controls Tip */}
       <div className="absolute bottom-52 left-4 bg-black/50 p-2 rounded text-xs text-gray-300 pointer-events-none">
-          <div className="flex items-center space-x-2">
-              <MousePointer2 size={12} />
-              <span>Left Click: Select | Drag: Box Select | Right Click: Action</span>
+          <div className="flex flex-col space-y-1">
+            <div className="flex items-center space-x-2">
+                <MousePointer2 size={12} />
+                <span>Left: Select | Drag: Box | Right: Action/Rally</span>
+            </div>
+            <div className="flex items-center space-x-2">
+                 <span className="font-bold border border-gray-500 px-1 rounded">A</span>
+                 <span>Attack Move</span>
+                 <span className="font-bold border border-gray-500 px-1 rounded ml-2">Ctrl + 0-9</span>
+                 <span>Group</span>
+            </div>
           </div>
       </div>
 
@@ -129,7 +145,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                         style={{
                             left: `${(e.position.x + 50) / 100 * 100}%`,
                             top: `${(e.position.z + 50) / 100 * 100}%`,
-                            backgroundColor: e.type === EntityType.RESOURCE ? 'gold' : (e.faction === 'Player' ? '#3b82f6' : '#ef4444')
+                            backgroundColor: e.type === EntityType.RESOURCE ? 'gold' : (e.faction === Faction.PLAYER ? '#3b82f6' : '#ef4444')
                         }}
                     />
                 );
@@ -164,21 +180,30 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
               <div className="w-full h-[1px] bg-gray-600 my-2"></div>
               
+              {/* Queue Display for Buildings */}
+              {selectedEntity.type === EntityType.BUILDING && selectedEntity.productionQueue && selectedEntity.productionQueue.length > 0 && (
+                  <div className="w-full mb-2">
+                      <div className="text-xs text-left mb-1 text-gold-400">Training: {selectedEntity.productionQueue[0].unitType}</div>
+                      <div className="w-full bg-gray-800 h-2 rounded-full overflow-hidden mb-1">
+                        <div className="bg-blue-500 h-full transition-all duration-100" style={{ width: `${(selectedEntity.productionQueue[0].progress / selectedEntity.productionQueue[0].totalTime) * 100}%` }}></div>
+                      </div>
+                      <div className="flex space-x-1">
+                          {selectedEntity.productionQueue.slice(1).map((item, idx) => (
+                              <div key={idx} className="w-6 h-6 bg-gray-700 border border-gray-500 flex items-center justify-center text-[8px]">
+                                  {item.unitType[0]}
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              )}
+
               {/* Stats */}
-              <div className="w-full grid grid-cols-2 gap-2 text-xs text-gray-400">
+              <div className="w-full grid grid-cols-2 gap-2 text-xs text-gray-400 mt-auto">
                    {selectedEntity.type === EntityType.UNIT || selectedEntity.subType === BuildingType.TOWER ? (
                        <div className="flex items-center"><Sword size={12} className="mr-1"/> {UNIT_STATS[selectedEntity.subType as UnitType]?.damage || 0} Dmg</div>
                    ) : null}
                   <div className="flex items-center"><ShieldAlert size={12} className="mr-1"/> {Math.floor(selectedEntity.maxHp/100)} Armor</div>
               </div>
-
-              <button 
-                onClick={() => onGetLore(selectedEntity)}
-                className="mt-auto w-full py-1 bg-stone-700 hover:bg-stone-600 text-xs border border-stone-500 rounded flex items-center justify-center space-x-1"
-              >
-                  <Scroll size={12} />
-                  <span>Read Lore</span>
-              </button>
             </>
           ) : (
             <div className="text-gray-500 text-sm italic mt-10">No Selection</div>
@@ -187,6 +212,17 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
         {/* Command Card */}
         <div className="flex-1 bg-stone-900 p-4 grid grid-cols-4 grid-rows-2 gap-2">
+             {/* General Unit Commands */}
+             {selectedEntity && selectedEntity.type === EntityType.UNIT && selectedEntity.faction === Faction.PLAYER && (
+                 <ActionButton 
+                    icon={<Crosshair />} 
+                    label="Attack (A)" 
+                    cost={{gold:0,wood:0}} 
+                    onClick={() => onCommand('ATTACK_MOVE')} 
+                 />
+             )}
+
+            {/* Building Production Commands */}
             {selectedEntity && selectedEntity.type === EntityType.BUILDING && selectedEntity.subType === BuildingType.TOWN_HALL && (
                  <ActionButton 
                     icon={<Users />} 

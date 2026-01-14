@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { v4 as uuidv4 } from 'uuid';
 import * as THREE from 'three';
@@ -6,11 +7,11 @@ import * as THREE from 'three';
 import { GameScene } from './components/GameScene';
 import { UIOverlay } from './components/UIOverlay';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType } from './types';
-import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS } from './constants';
+import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
 const INITIAL_ENTITIES: Entity[] = [
-  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0, visible: true },
+  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0, visible: true, productionQueue: [], rallyPoint: null },
   { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0, visible: true },
   
   { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
@@ -29,26 +30,106 @@ export default function App() {
     projectiles: [],
     floatingTexts: [],
     selection: [],
+    controlGroups: {},
     messages: [{ id: 'init', text: 'Welcome to Realm of Aethelgard.', type: 'info', timestamp: Date.now() }],
     placementMode: { active: false, type: null, cost: { gold: 0, wood: 0 } },
+    commandMode: { active: false, type: null },
     gameOver: false,
     wave: 1
   });
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
+  const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(null);
 
   const waveTimerRef = useRef(0);
   const nextWaveTimeRef = useRef(60);
+  const lastKeyTimeRef = useRef<{key: string, time: number}>({ key: '', time: 0 });
 
-  const addMessage = (text: string, type: 'info' | 'alert' | 'lore' = 'info') => {
+  const addMessage = useCallback((text: string, type: 'info' | 'alert' | 'lore' = 'info') => {
     setGameState(prev => ({
       ...prev,
       messages: [...prev.messages, { id: uuidv4(), text, type, timestamp: Date.now() }]
     }));
-  };
+  }, []);
+
+  // --- Input Handling (Keyboard) ---
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (gameState.gameOver) return;
+
+          // 1. Command Mode (A)
+          if (e.code === 'KeyA') {
+              setGameState(prev => ({
+                  ...prev,
+                  placementMode: { active: false, type: null, cost: {gold:0, wood:0} },
+                  commandMode: { active: true, type: 'ATTACK_MOVE' }
+              }));
+              return;
+          }
+
+          // 2. Escape to Cancel
+          if (e.code === 'Escape') {
+              setGameState(prev => ({
+                  ...prev,
+                  placementMode: { active: false, type: null, cost: {gold:0, wood:0} },
+                  commandMode: { active: false, type: null },
+                  selection: []
+              }));
+              return;
+          }
+
+          // 3. Control Groups (1-9)
+          const isNum = /Digit[1-9]/.test(e.code);
+          if (isNum) {
+              const groupNum = e.key;
+              if (e.ctrlKey) {
+                  // Save group
+                  setGameState(prev => {
+                      if (prev.selection.length === 0) return prev;
+                      const newGroups = { ...prev.controlGroups, [groupNum]: prev.selection };
+                      return { 
+                          ...prev, 
+                          controlGroups: newGroups,
+                          messages: [...prev.messages, { id: uuidv4(), text: `Group ${groupNum} assigned.`, type: 'info', timestamp: Date.now() }] 
+                      };
+                  });
+              } else {
+                  // Load group
+                  setGameState(prev => {
+                      const group = prev.controlGroups[groupNum];
+                      if (!group || group.length === 0) return prev;
+                      
+                      // Double tap detection
+                      const now = Date.now();
+                      if (lastKeyTimeRef.current.key === groupNum && now - lastKeyTimeRef.current.time < 300) {
+                          // Center Camera
+                          const firstEnt = prev.entities.find(en => en.id === group[0]);
+                          if (firstEnt) {
+                              setCameraTarget(new THREE.Vector3(firstEnt.position.x, firstEnt.position.y, firstEnt.position.z));
+                          }
+                      }
+                      lastKeyTimeRef.current = { key: groupNum, time: now };
+
+                      return {
+                          ...prev,
+                          selection: group,
+                          entities: prev.entities.map(en => ({
+                              ...en,
+                              selected: group.includes(en.id)
+                          }))
+                      };
+                  });
+              }
+          }
+      };
+      
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState.gameOver]);
+
 
   const handleSelectEntity = (ids: string[], multi: boolean) => {
-    if (gameState.placementMode.active) return; 
+    if (gameState.placementMode.active || gameState.commandMode.active) return; 
 
     setGameState(prev => {
         const visibleIds = ids.filter(id => {
@@ -71,16 +152,30 @@ export default function App() {
   };
 
   const handleRightClickGround = (point: THREE.Vector3) => {
-    if (gameState.placementMode.active) {
-        setGameState(prev => ({ ...prev, placementMode: { active: false, type: null, cost: {gold:0, wood:0} } }));
-        addMessage("Building cancelled.");
+    if (gameState.placementMode.active || gameState.commandMode.active) {
+        setGameState(prev => ({ 
+            ...prev, 
+            placementMode: { active: false, type: null, cost: {gold:0, wood:0} },
+            commandMode: { active: false, type: null }
+        }));
         return;
     }
 
     setGameState(prev => {
       const selectedIds = prev.selection;
       if (selectedIds.length === 0) return prev;
+      
+      // If buildings are selected, set Rally Point
+      const buildingSelected = prev.entities.find(e => selectedIds.includes(e.id) && e.type === EntityType.BUILDING);
+      if (buildingSelected && selectedIds.length === 1) {
+          return {
+              ...prev,
+              entities: prev.entities.map(e => e.id === buildingSelected.id ? { ...e, rallyPoint: {x: point.x, y:0, z: point.z} } : e),
+              messages: [...prev.messages, { id: uuidv4(), text: "Rally point set.", type: 'info', timestamp: Date.now() }]
+          };
+      }
 
+      // Unit Movement
       return {
         ...prev,
         entities: prev.entities.map(e => {
@@ -89,7 +184,8 @@ export default function App() {
               ...e,
               state: 'moving',
               targetPos: { x: point.x, y: 0, z: point.z },
-              targetId: null
+              targetId: null,
+              attackMoveDestination: null // Clear attack move if normal move
             };
           }
           return e;
@@ -98,8 +194,36 @@ export default function App() {
     });
   };
 
+  const handleAttackMove = (point: THREE.Vector3) => {
+      setGameState(prev => {
+          const selectedIds = prev.selection;
+          return {
+              ...prev,
+              commandMode: { active: false, type: null },
+              entities: prev.entities.map(e => {
+                  if (selectedIds.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
+                      return {
+                          ...e,
+                          state: 'moving',
+                          targetPos: { x: point.x, y: 0, z: point.z },
+                          attackMoveDestination: { x: point.x, y: 0, z: point.z }, // Mark as attack move
+                          targetId: null
+                      };
+                  }
+                  return e;
+              }),
+              messages: [...prev.messages, { id: uuidv4(), text: "Attack Move!", type: 'info', timestamp: Date.now() }]
+          };
+      });
+  };
+
   const handleRightClickEntity = (targetId: string) => {
     setGameState(prev => {
+      if (prev.commandMode.active) {
+          // If we click an entity while in attack command mode, it's just a direct attack
+          return { ...prev, commandMode: { active: false, type: null } }; // Continue to logic below
+      }
+
       const target = prev.entities.find(e => e.id === targetId);
       if (!target || !target.visible) return prev;
       
@@ -107,16 +231,38 @@ export default function App() {
 
       const newEntities = prev.entities.map(e => {
           if (prev.selection.includes(e.id) && e.faction === Faction.PLAYER && e.type === EntityType.UNIT) {
+            // Attack Enemy
             if (target.faction === Faction.ENEMY) {
                 actionTriggered = true;
-                return { ...e, state: 'attacking', targetId: target.id, targetPos: null };
+                return { 
+                    ...e, 
+                    state: 'attacking', 
+                    targetId: target.id, 
+                    targetPos: null,
+                    attackMoveDestination: null 
+                };
             }
+            // Gather Resource
             if (target.type === EntityType.RESOURCE && e.subType === UnitType.PEASANT) {
                 actionTriggered = true;
-                return { ...e, state: 'gathering', targetId: target.id, targetPos: null, lastResourceId: target.id };
+                return { 
+                    ...e, 
+                    state: 'gathering', 
+                    targetId: target.id, 
+                    targetPos: null, 
+                    lastResourceId: target.id,
+                    attackMoveDestination: null
+                };
             }
+            // Follow/Guard (Basic Move to pos)
             actionTriggered = true;
-            return { ...e, state: 'moving', targetPos: target.position, targetId: null };
+            return { 
+                ...e, 
+                state: 'moving', 
+                targetPos: target.position, 
+                targetId: null,
+                attackMoveDestination: null
+            };
           }
           return e;
       });
@@ -164,7 +310,9 @@ export default function App() {
                 maxHp: UNIT_STATS[type].hp,
                 name: type,
                 lastAttackTime: 0,
-                visible: true
+                visible: true,
+                productionQueue: [],
+                rallyPoint: { x: pos.x + 5, y: 0, z: pos.z + 5 } // Default rally
               };
               
               setGameState(prev => ({
@@ -191,50 +339,40 @@ export default function App() {
     const cost = COSTS[type];
     if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
        const buildingId = gameState.selection[0];
-       const building = gameState.entities.find(e => e.id === buildingId);
        
-       if (building) {
-           setGameState(prev => ({
-               ...prev,
-               resources: { 
-                   ...prev.resources, 
-                   gold: prev.resources.gold - cost.gold,
-                   wood: prev.resources.wood - cost.wood,
-                   food: prev.resources.food + (cost.food || 1)
-               },
-               messages: [...prev.messages, { id: uuidv4(), text: `Training ${type}...`, type: 'info', timestamp: Date.now() }]
-           }));
+       setGameState(prev => {
+            const building = prev.entities.find(e => e.id === buildingId);
+            if (!building || !building.productionQueue) return prev;
+            if (building.productionQueue.length >= QUEUE_SIZE) {
+                return {
+                    ...prev,
+                    messages: [...prev.messages, { id: uuidv4(), text: "Production queue full!", type: 'alert', timestamp: Date.now() }]
+                };
+            }
 
-           setTimeout(() => {
-               setGameState(prev => {
-                   const stillBuilding = prev.entities.find(e => e.id === buildingId); 
-                   if (!stillBuilding) return prev;
+            // Deduct resources immediately
+            const newResources = {
+                ...prev.resources,
+                gold: prev.resources.gold - cost.gold,
+                wood: prev.resources.wood - cost.wood,
+                food: prev.resources.food + (cost.food || 1)
+            };
 
-                   const newUnit: Entity = {
-                       id: uuidv4(),
-                       type: EntityType.UNIT,
-                       subType: type,
-                       faction: Faction.PLAYER,
-                       position: { 
-                           x: building.position.x + 3, 
-                           y: 0, 
-                           z: building.position.z + 3 
-                       },
-                       hp: UNIT_STATS[type].hp,
-                       maxHp: UNIT_STATS[type].hp,
-                       state: 'idle',
-                       name: `${type}`,
-                       lastAttackTime: 0,
-                       visible: true
-                   };
-                   return {
-                       ...prev,
-                       entities: [...prev.entities, newUnit],
-                       messages: [...prev.messages, { id: uuidv4(), text: `${type} Ready!`, type: 'info', timestamp: Date.now() }]
-                   };
-               });
-           }, COSTS[type].time);
-       }
+            const updatedBuilding = {
+                ...building,
+                productionQueue: [
+                    ...building.productionQueue, 
+                    { id: uuidv4(), unitType: type, progress: 0, totalTime: cost.time }
+                ]
+            };
+
+            return {
+                ...prev,
+                resources: newResources,
+                entities: prev.entities.map(e => e.id === buildingId ? updatedBuilding : e),
+                messages: [...prev.messages, { id: uuidv4(), text: `Training ${type}...`, type: 'info', timestamp: Date.now() }]
+            };
+       });
     } else {
         addMessage("Not enough resources!", 'alert');
     }
@@ -260,6 +398,14 @@ export default function App() {
       addMessage(tip, 'lore');
   }
 
+  const handleCommand = (cmd: 'ATTACK_MOVE') => {
+      setGameState(prev => ({
+          ...prev,
+          commandMode: { active: true, type: cmd }
+      }));
+  };
+
+  // --- GAME LOOP ---
   useEffect(() => {
     const interval = setInterval(() => {
         setGameState(prev => {
@@ -274,12 +420,15 @@ export default function App() {
             let hasChanges = false;
             let currentWave = prev.wave;
 
+            const delta = 1000/30; // approx ms per frame
+
+            // 1. WAVE LOGIC
             waveTimerRef.current += 1/30;
             if (waveTimerRef.current >= nextWaveTimeRef.current) {
                 waveTimerRef.current = 0;
                 currentWave++;
                 const spawnCount = Math.floor(currentWave * 1.5) + 1;
-                addMessage(`Wave ${currentWave} approaching!`, 'alert');
+                messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
                 
                 for(let i=0; i<spawnCount; i++) {
                     const angle = Math.random() * Math.PI * 2;
@@ -302,8 +451,66 @@ export default function App() {
                 hasChanges = true;
             }
 
+            // 2. PRODUCTION QUEUES
+            const spawnedUnits: Entity[] = [];
+
+            newEntities = newEntities.map(e => {
+                if (e.type === EntityType.BUILDING && e.productionQueue && e.productionQueue.length > 0) {
+                    const currentQueue = [...e.productionQueue];
+                    const currentItem = { ...currentQueue[0] };
+                    
+                    currentItem.progress += delta;
+                    
+                    if (currentItem.progress >= currentItem.totalTime) {
+                        // Spawn Unit
+                        const spawnPos = { x: e.position.x + 3, y: 0, z: e.position.z + 3 };
+                        const newUnit: Entity = {
+                            id: uuidv4(),
+                            type: EntityType.UNIT,
+                            subType: currentItem.unitType,
+                            faction: Faction.PLAYER,
+                            position: spawnPos,
+                            hp: UNIT_STATS[currentItem.unitType].hp,
+                            maxHp: UNIT_STATS[currentItem.unitType].hp,
+                            state: 'idle',
+                            name: `${currentItem.unitType}`,
+                            lastAttackTime: 0,
+                            visible: true,
+                        };
+
+                        // Check Rally Point
+                        if (e.rallyPoint) {
+                            newUnit.state = 'moving';
+                            newUnit.targetPos = e.rallyPoint;
+                            newUnit.attackMoveDestination = e.rallyPoint; // Auto attack move to rally
+                        }
+
+                        spawnedUnits.push(newUnit);
+                        messages.push({ id: uuidv4(), text: `${currentItem.unitType} Ready!`, type: 'info', timestamp: Date.now() });
+                        
+                        // Shift queue
+                        const newQueue = currentQueue.slice(1);
+                        hasChanges = true;
+                        return { ...e, productionQueue: newQueue };
+                    } else {
+                        // Update progress in immutable way
+                        currentQueue[0] = currentItem;
+                        hasChanges = true;
+                        return { ...e, productionQueue: currentQueue };
+                    }
+                }
+                return e;
+            });
+
+            if (spawnedUnits.length > 0) {
+                newEntities = [...newEntities, ...spawnedUnits];
+                hasChanges = true;
+            }
+
+            // 3. VISIBILITY & ENTITY UPDATE LOOP
             const playerEntities = newEntities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
             
+            // Fog of War Logic
             newEntities = newEntities.map(entity => {
                 if (entity.faction === Faction.PLAYER) {
                     return { ...entity, visible: true };
@@ -314,7 +521,6 @@ export default function App() {
                         const range = stats?.visionRange || 8;
                         const dx = entity.position.x - p.position.x;
                         const dz = entity.position.z - p.position.z;
-                        // Use a slightly larger check here to ensure they pop in smoothly with the shader
                         if (dx*dx + dz*dz < (range + 0.5) * (range + 0.5)) {
                             isVisible = true;
                             break;
@@ -328,6 +534,7 @@ export default function App() {
                 }
             });
 
+            // Projectile Physics
             newProjectiles = newProjectiles.map(p => {
                 const target = prev.entities.find(e => e.id === p.targetId);
                 if (!target) return { ...p, progress: 2 }; 
@@ -340,6 +547,7 @@ export default function App() {
             newProjectiles = newProjectiles.filter(p => p.progress < 1);
             if (hitProjectiles.length > 0 || newProjectiles.length !== prev.projectiles.length) hasChanges = true;
 
+            // Damage Calc
             const damageMap: Record<string, number> = {};
             hitProjectiles.forEach(p => {
                 damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
@@ -351,12 +559,14 @@ export default function App() {
 
             const resourceMap: Record<string, number> = {}; 
 
+            // Entity Logic Loop
             newEntities = newEntities.map(entity => {
                 const CARRY_CAPACITY = 10;
                 const TICK_SPEED = 0.033;
                 let pos = { ...entity.position };
                 const stats = UNIT_STATS[entity.subType as UnitType] || UNIT_STATS[UnitType.PEASANT];
 
+                // Unit Separation
                 if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking' || entity.state === 'gathering' || entity.state === 'returning')) {
                     const separationRadius = 1.0;
                     let moveX = 0, moveZ = 0;
@@ -382,6 +592,41 @@ export default function App() {
                     }
                 }
 
+                // --- AUTO RETALIATION & ATTACK MOVE SCANNING ---
+                if (entity.type === EntityType.UNIT && entity.faction === Faction.PLAYER) {
+                    const isAttackMove = entity.state === 'moving' && entity.attackMoveDestination;
+                    const isIdle = entity.state === 'idle';
+
+                    if (isIdle || isAttackMove) {
+                        // Scan for enemies
+                        let closestEnemy = null;
+                        let minDst = AGGRO_RANGE;
+                        
+                        for(const other of prev.entities) {
+                            if (other.faction === Faction.ENEMY && other.hp > 0 && other.visible) {
+                                const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
+                                if (d < minDst) {
+                                    minDst = d;
+                                    closestEnemy = other;
+                                }
+                            }
+                        }
+
+                        if (closestEnemy) {
+                            hasChanges = true;
+                            return { 
+                                ...entity, 
+                                state: 'attacking', 
+                                targetId: closestEnemy.id, 
+                                position: pos,
+                                // If we were attack-moving, keep the destination, otherwise null
+                                attackMoveDestination: entity.attackMoveDestination || null 
+                            };
+                        }
+                    }
+                }
+                
+                // --- ENEMY AI ---
                 if (entity.faction === Faction.ENEMY && entity.type === EntityType.UNIT) {
                     if (entity.state === 'idle' || (entity.state === 'moving' && !entity.targetId)) {
                         let closest = null;
@@ -405,6 +650,7 @@ export default function App() {
                     }
                 }
                 
+                // Building Attack (Towers)
                 if (entity.subType === BuildingType.TOWER && entity.faction === Faction.PLAYER) {
                     if (now - entity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
@@ -428,14 +674,17 @@ export default function App() {
                     }
                 }
 
+                // Movement
                 if (entity.state === 'moving' && entity.targetPos) {
                     const dx = entity.targetPos.x - pos.x;
                     const dz = entity.targetPos.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     const speed = (stats.speed || 3) * TICK_SPEED;
+                    
                     if (dist < 0.5) {
                         hasChanges = true;
-                        return { ...entity, state: 'idle', targetPos: null, position: pos };
+                        // Reached destination. Clear attack move flag.
+                        return { ...entity, state: 'idle', targetPos: null, position: pos, attackMoveDestination: null };
                     } else {
                         hasChanges = true;
                         pos.x += (dx/dist) * speed;
@@ -444,6 +693,7 @@ export default function App() {
                     }
                 }
 
+                // Gathering
                 if (entity.state === 'gathering') {
                     if ((entity.carryAmount || 0) >= CARRY_CAPACITY) {
                         const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
@@ -484,6 +734,7 @@ export default function App() {
                     }
                 }
 
+                // Returning Resources
                 if (entity.state === 'returning') {
                      const townHall = prev.entities.find(t => t.id === entity.targetId);
                      if (!townHall) {
@@ -511,16 +762,29 @@ export default function App() {
                      }
                 }
                 
+                // Attacking
                 if (entity.state === 'attacking' && entity.targetId) {
                      const target = prev.entities.find(t => t.id === entity.targetId);
                      if (!target || target.hp <= 0 || !target.visible) {
                          hasChanges = true;
+                         // Resume attack move if applicable
+                         if (entity.attackMoveDestination) {
+                             return { 
+                                 ...entity, 
+                                 state: 'moving', 
+                                 targetPos: entity.attackMoveDestination, 
+                                 targetId: null, 
+                                 position: pos 
+                             };
+                         }
                          return { ...entity, state: 'idle', position: pos };
                      }
+
                      const dx = target.position.x - pos.x;
                      const dz = target.position.z - pos.z;
                      const dist = Math.sqrt(dx*dx + dz*dz);
                      const range = stats.range || 2;
+                     
                      if (dist > range) {
                          const speed = (stats.speed || 3) * TICK_SPEED;
                          hasChanges = true;
@@ -571,6 +835,8 @@ export default function App() {
             if (survivingEntities.length !== prev.entities.length) hasChanges = true;
             newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
             if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
+            
+            // Clean up selection
             const newSelection = prev.selection.filter(id => survivingEntities.find(e => e.id === id));
             
             return hasChanges ? { 
@@ -597,11 +863,14 @@ export default function App() {
             projectiles={gameState.projectiles}
             floatingTexts={gameState.floatingTexts}
             placementMode={gameState.placementMode}
+            commandMode={gameState.commandMode}
+            cameraTarget={cameraTarget}
             onSelectEntity={handleSelectEntity}
             onRightClickGround={handleRightClickGround}
             onRightClickEntity={handleRightClickEntity}
             onPlaceBuilding={handlePlaceBuilding}
             onSelectionChange={setSelectionBox}
+            onAttackMove={handleAttackMove}
         />
       </Canvas>
       {selectionBox && (
@@ -630,6 +899,7 @@ export default function App() {
         onBuild={handleBuild}
         onGetLore={handleLore}
         onGetAdvisor={handleAdvisor}
+        onCommand={handleCommand}
       />
     </div>
   );

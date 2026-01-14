@@ -1,9 +1,10 @@
+
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Sky, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { Entity, EntityType, BuildingType, PlacementMode, Projectile, FloatingText, Faction } from '../types';
-import { Unit3D, Building3D, Resource3D, Projectile3D, FloatingText3D } from './WorldEntities';
+import { Entity, EntityType, BuildingType, PlacementMode, Projectile, FloatingText, Faction, CommandMode } from '../types';
+import { Unit3D, Building3D, Resource3D, Projectile3D, FloatingText3D, RallyPoint3D } from './WorldEntities';
 import { UNIT_STATS } from '../constants';
 
 interface GameSceneProps {
@@ -11,11 +12,14 @@ interface GameSceneProps {
   projectiles: Projectile[];
   floatingTexts: FloatingText[];
   placementMode: PlacementMode;
+  commandMode: CommandMode;
+  cameraTarget: THREE.Vector3 | null;
   onSelectEntity: (ids: string[], multi: boolean) => void;
   onRightClickGround: (pos: THREE.Vector3) => void;
   onRightClickEntity: (targetId: string) => void;
   onPlaceBuilding: (pos: THREE.Vector3) => void;
   onSelectionChange: (box: {start: {x:number, y:number}, current: {x:number, y:number}} | null) => void;
+  onAttackMove: (pos: THREE.Vector3) => void;
 }
 
 const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> = ({ type, position }) => {
@@ -168,11 +172,14 @@ export const GameScene: React.FC<GameSceneProps> = ({
   projectiles,
   floatingTexts,
   placementMode,
+  commandMode,
+  cameraTarget,
   onSelectEntity,
   onRightClickGround,
   onRightClickEntity,
   onPlaceBuilding,
-  onSelectionChange
+  onSelectionChange,
+  onAttackMove
 }) => {
   const groundRef = useRef<THREE.Mesh>(null);
   const controlsRef = useRef<any>(null); // Reference to OrbitControls
@@ -181,14 +188,22 @@ export const GameScene: React.FC<GameSceneProps> = ({
   const [hoverPos, setHoverPos] = useState<THREE.Vector3 | null>(null);
   const [marker, setMarker] = useState<{pos: THREE.Vector3, color: string, id: number} | null>(null);
   
-  // Use refs to track dragging state locally for event handlers without causing re-renders/stale closures
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{x: number, y: number} | null>(null);
   
   const entitiesRef = useRef(entities);
-  entitiesRef.current = entities; // Keep entities fresh
+  entitiesRef.current = entities; 
 
   const { camera, size, gl } = useThree();
+
+  // Move camera if target changes programmatically (e.g. double tap group)
+  useEffect(() => {
+    if (cameraTarget && controlsRef.current) {
+        controlsRef.current.target.set(cameraTarget.x, 0, cameraTarget.z);
+        camera.position.set(cameraTarget.x + 20, 25, cameraTarget.z + 20);
+        controlsRef.current.update();
+    }
+  }, [cameraTarget, camera]);
 
   // Keyboard listeners for panning
   useEffect(() => {
@@ -201,6 +216,17 @@ export const GameScene: React.FC<GameSceneProps> = ({
         window.removeEventListener('keyup', handleKeyUp);
     }
   }, []);
+
+  // Update cursor based on mode
+  useEffect(() => {
+    if (placementMode.active) {
+        document.body.style.cursor = 'crosshair';
+    } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE') {
+        document.body.style.cursor = 'crosshair';
+    } else {
+        document.body.style.cursor = 'default';
+    }
+  }, [placementMode.active, commandMode.active]);
 
   // Window Event Listeners for Dragging
   useEffect(() => {
@@ -229,10 +255,9 @@ export const GameScene: React.FC<GameSceneProps> = ({
 
                   const selected: string[] = [];
                   entitiesRef.current.forEach(ent => {
-                      if (ent.faction === Faction.PLAYER && ent.type === EntityType.UNIT) {
+                      if (ent.faction === Faction.PLAYER && ent.type === EntityType.UNIT && ent.visible) {
                           const pos = new THREE.Vector3(ent.position.x, ent.position.y, ent.position.z);
                           pos.project(camera);
-                          // Convert normalized device coordinates to screen coordinates
                           const x = (pos.x * .5 + .5) * size.width;
                           const y = (-(pos.y * .5) + .5) * size.height;
 
@@ -243,15 +268,12 @@ export const GameScene: React.FC<GameSceneProps> = ({
                   });
                   onSelectEntity(selected, e.shiftKey);
               } else {
-                  // If clicking on the canvas directly (not on UI), clear selection
-                  // Note: Right click is handled separately. This is left click release.
-                  // We check if target is the canvas to avoid clearing when interacting with UI overlay
-                  if (e.target === gl.domElement) {
+                  // Single click on ground (handled here to clear selection if not clicking entity)
+                  if (e.target === gl.domElement && !placementMode.active && !commandMode.active) {
                       onSelectEntity([], false);
                   }
               }
               
-              // Reset
               isDraggingRef.current = false;
               dragStartRef.current = null;
               onSelectionChange(null);
@@ -265,13 +287,13 @@ export const GameScene: React.FC<GameSceneProps> = ({
           window.removeEventListener('pointermove', handleWindowMove);
           window.removeEventListener('pointerup', handleWindowUp);
       };
-  }, [camera, size, gl, onSelectEntity, onSelectionChange]);
+  }, [camera, size, gl, onSelectEntity, onSelectionChange, placementMode.active, commandMode.active]);
 
 
   // Camera Pan Loop
   useFrame((state, delta) => {
     const PAN_SPEED = 30 * delta;
-    const EDGE_THRESHOLD = 0.95;
+    const EDGE_THRESHOLD = 0.98; // Less sensitive edge scroll
     const { pointer, camera } = state;
 
     let moveX = 0;
@@ -283,16 +305,13 @@ export const GameScene: React.FC<GameSceneProps> = ({
     if (keysPressed.current['KeyA'] || keysPressed.current['ArrowLeft']) moveX -= 1;
     if (keysPressed.current['KeyD'] || keysPressed.current['ArrowRight']) moveX += 1;
 
-    // Edge Scrolling (Mouse)
-    // Only applies if pointer is active on canvas (normalized -1 to 1)
+    // Edge Scrolling
     if (pointer.x > EDGE_THRESHOLD) moveX += 1;
     if (pointer.x < -EDGE_THRESHOLD) moveX -= 1;
-    // In 3D (X,Z plane), "Up" on screen maps to decreasing Z (forward)
     if (pointer.y > EDGE_THRESHOLD) moveZ -= 1; 
     if (pointer.y < -EDGE_THRESHOLD) moveZ += 1;
 
     if (moveX !== 0 || moveZ !== 0) {
-        // Normalize speed
         const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
         if (len > 0) {
             moveX = moveX / len;
@@ -306,7 +325,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
             const targetX = target.x + moveX * PAN_SPEED;
             const targetZ = target.z + moveZ * PAN_SPEED;
             
-            // Map Bounds clamping (-50 to 50)
             const BOUNDS = 50;
             const clampedTargetX = Math.max(-BOUNDS, Math.min(BOUNDS, targetX));
             const clampedTargetZ = Math.max(-BOUNDS, Math.min(BOUNDS, targetZ));
@@ -330,8 +348,9 @@ export const GameScene: React.FC<GameSceneProps> = ({
   };
 
   const handlePointerDown = (e: any) => {
-      if (e.button === 0 && !placementMode.active) {
-          e.stopPropagation(); // Stop bubbling to orbit controls if clicking on ground
+      // Only drag if not building or commanding
+      if (e.button === 0 && !placementMode.active && !commandMode.active) {
+          e.stopPropagation(); 
           isDraggingRef.current = true;
           dragStartRef.current = { x: e.clientX, y: e.clientY };
           onSelectionChange({ start: dragStartRef.current, current: dragStartRef.current });
@@ -339,7 +358,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
   };
 
   const handlePointerMove = (e: any) => {
-      // Logic for hover effect only
       if (e.intersections.length > 0) {
           const point = e.intersections[0].point;
            setHoverPos(new THREE.Vector3(Math.round(point.x), 0, Math.round(point.z)));
@@ -389,6 +407,10 @@ export const GameScene: React.FC<GameSceneProps> = ({
              if (placementMode.active && hoverPos) {
                  e.stopPropagation();
                  onPlaceBuilding(hoverPos);
+             } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE' && hoverPos) {
+                 e.stopPropagation();
+                 spawnMarker(hoverPos, '#ef4444');
+                 onAttackMove(hoverPos);
              }
         }}
         onContextMenu={(e) => {
@@ -410,6 +432,14 @@ export const GameScene: React.FC<GameSceneProps> = ({
           <GhostBuilding type={placementMode.type} position={hoverPos} />
       )}
 
+       {/* Attack Move Crosshair Cursor helper (optional 3d cursor) */}
+       {commandMode.active && commandMode.type === 'ATTACK_MOVE' && hoverPos && (
+          <mesh position={[hoverPos.x, 0.5, hoverPos.z]} rotation={[-Math.PI/2, 0, 0]} raycast={() => null}>
+             <ringGeometry args={[0.5, 0.6, 16]} />
+             <meshBasicMaterial color="#ef4444" opacity={0.8} transparent />
+          </mesh>
+       )}
+
       <gridHelper args={[120, 60, 0x000000, 0x000000]} position={[0, 0.01, 0]} raycast={() => null}>
          <meshBasicMaterial attach="material" color="black" transparent opacity={0.1} />
       </gridHelper>
@@ -418,9 +448,13 @@ export const GameScene: React.FC<GameSceneProps> = ({
         <group 
             key={entity.id} 
             onClick={(e) => {
-                e.stopPropagation();
-                if (!placementMode.active && entity.visible) {
+                if (!placementMode.active && !commandMode.active && entity.visible) {
+                    e.stopPropagation();
                     onSelectEntity([entity.id], e.shiftKey);
+                } else if (commandMode.active && commandMode.type === 'ATTACK_MOVE' && entity.visible) {
+                    e.stopPropagation();
+                    // Clicking an entity in attack move mode is basically a direct attack command
+                    onRightClickEntity(entity.id);
                 }
             }}
             onContextMenu={(e) => {
@@ -435,7 +469,12 @@ export const GameScene: React.FC<GameSceneProps> = ({
             onPointerOut={() => document.body.style.cursor = 'default'}
         >
             <Unit3D entity={entity} />
-            {entity.type === EntityType.BUILDING && <Building3D entity={entity} />}
+            {entity.type === EntityType.BUILDING && (
+                <>
+                    <Building3D entity={entity} />
+                    {entity.selected && entity.rallyPoint && <RallyPoint3D pos={entity.rallyPoint} />}
+                </>
+            )}
             {entity.type === EntityType.RESOURCE && <Resource3D entity={entity} />}
         </group>
       ))}

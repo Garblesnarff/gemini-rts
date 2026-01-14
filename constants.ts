@@ -1,3 +1,4 @@
+
 import { UnitType, BuildingType } from './types';
 
 export const COSTS = {
@@ -34,6 +35,9 @@ export const COLORS = {
   ENEMY: '#ef4444', // Red
   NEUTRAL: '#fbbf24', // Gold (resources)
   SELECTION: '#00ff00', // Green ring
+  RALLY: '#fbbf24', // Yellow flag
 };
 
 export const INITIAL_CAMERA_POS = [20, 25, 20] as const;
+export const AGGRO_RANGE = 10;
+export const QUEUE_SIZE = 5;

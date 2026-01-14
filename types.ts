@@ -1,3 +1,4 @@
+
 export enum EntityType {
   UNIT = 'UNIT',
   BUILDING = 'BUILDING',
@@ -35,6 +36,13 @@ export interface Position {
   z: number;
 }
 
+export interface QueueItem {
+  id: string;
+  unitType: UnitType;
+  progress: number;
+  totalTime: number;
+}
+
 export interface Entity {
   id: string;
   type: EntityType;
@@ -49,12 +57,19 @@ export interface Entity {
   state?: 'idle' | 'moving' | 'gathering' | 'attacking' | 'returning';
   visible?: boolean; // Fog of War visibility status
   
+  // Advanced Movement
+  attackMoveDestination?: Position | null; // If set, unit returns to moving here after combat
+
   // Economy
   resourceAmount?: number;
   carryAmount?: number;
   carryType?: ResourceType;
   lastResourceId?: string;
   
+  // Buildings
+  productionQueue?: QueueItem[];
+  rallyPoint?: Position | null;
+
   // Combat
   lastAttackTime: number;
   name: string;
@@ -83,6 +98,11 @@ export interface PlacementMode {
   cost: { gold: number; wood: number };
 }
 
+export interface CommandMode {
+  active: boolean;
+  type: 'ATTACK_MOVE' | null;
+}
+
 export interface GameState {
   resources: {
     gold: number;
@@ -94,8 +114,10 @@ export interface GameState {
   projectiles: Projectile[];
   floatingTexts: FloatingText[];
   selection: string[]; 
+  controlGroups: Record<string, string[]>; // Key "1" through "9" -> Entity IDs
   messages: LogMessage[];
   placementMode: PlacementMode;
+  commandMode: CommandMode;
   gameOver: boolean;
   wave: number;
 }
