@@ -1,0 +1,5 @@
+{
+  "name": "Realm of Aethelgard RTS",
+  "description": "A fantasy RTS game featuring unit management, resource gathering, and base building, styled like classic 2000s strategy games. powered by Three.js and Gemini for dynamic lore.",
+  "requestFramePermissions": []
+}
