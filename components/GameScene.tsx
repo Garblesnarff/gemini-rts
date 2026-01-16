@@ -1,11 +1,12 @@
 
+
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Sky, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Entity, EntityType, BuildingType, PlacementMode, Projectile, FloatingText, Faction, CommandMode } from '../types';
 import { Unit3D, Building3D, Resource3D, Projectile3D, FloatingText3D, RallyPoint3D } from './WorldEntities';
-import { UNIT_STATS } from '../constants';
+import { UNIT_STATS, DRAG_THRESHOLD } from '../constants';
 
 interface GameSceneProps {
   entities: Entity[];
@@ -192,6 +193,13 @@ export const GameScene: React.FC<GameSceneProps> = ({
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{x: number, y: number} | null>(null);
   
+  // Right-click Pan Refs
+  const rightDragStart = useRef<{x: number, y: number} | null>(null);
+  const isRightPanning = useRef(false);
+  const panStartCamPos = useRef(new THREE.Vector3());
+  const panStartTarget = useRef(new THREE.Vector3());
+  const ignoreNextContextMenu = useRef(false);
+
   const entitiesRef = useRef(entities);
   entitiesRef.current = entities; 
 
@@ -218,6 +226,80 @@ export const GameScene: React.FC<GameSceneProps> = ({
     }
   }, []);
 
+  // Pan Event Listeners (Right Click Drag)
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    const onPointerDown = (e: PointerEvent) => {
+        if (e.button === 2) { // Right Click
+            rightDragStart.current = { x: e.clientX, y: e.clientY };
+            isRightPanning.current = false;
+            panStartCamPos.current.copy(camera.position);
+            if (controlsRef.current) {
+                panStartTarget.current.copy(controlsRef.current.target);
+            }
+        }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+        if (rightDragStart.current) {
+            const dx = e.clientX - rightDragStart.current.x;
+            const dy = e.clientY - rightDragStart.current.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (!isRightPanning.current && dist > DRAG_THRESHOLD) {
+                isRightPanning.current = true;
+            }
+
+            if (isRightPanning.current && controlsRef.current) {
+                const height = camera.position.y;
+                const sensitivity = 0.05 * (height / 25); 
+                
+                // Move camera opposite to drag direction (Pulling the world)
+                const moveX = dx * sensitivity;
+                const moveZ = dy * sensitivity;
+
+                camera.position.x = panStartCamPos.current.x - moveX;
+                camera.position.z = panStartCamPos.current.z - moveZ;
+                controlsRef.current.target.x = panStartTarget.current.x - moveX;
+                controlsRef.current.target.z = panStartTarget.current.z - moveZ;
+                controlsRef.current.update();
+            }
+        }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+        if (e.button === 2) {
+            if (isRightPanning.current) {
+                ignoreNextContextMenu.current = true;
+            }
+            rightDragStart.current = null;
+            isRightPanning.current = false;
+        }
+    };
+
+    // Global context menu suppression during pan logic is handled in specific handlers, 
+    // but we add a failsafe listener on the canvas just in case user drags on void
+    const onContextMenu = (e: MouseEvent) => {
+         if (ignoreNextContextMenu.current) {
+            e.preventDefault();
+            e.stopPropagation();
+         }
+    };
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('contextmenu', onContextMenu);
+
+    return () => {
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        canvas.removeEventListener('contextmenu', onContextMenu);
+    };
+  }, [camera, gl.domElement]);
+
   // Update cursor based on mode
   useEffect(() => {
     if (placementMode.active) {
@@ -229,7 +311,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
     }
   }, [placementMode.active, commandMode.active]);
 
-  // Window Event Listeners for Dragging
+  // Window Event Listeners for Dragging (Selection Box)
   useEffect(() => {
       const handleWindowMove = (e: PointerEvent) => {
           if (isDraggingRef.current && dragStartRef.current) {
@@ -291,12 +373,10 @@ export const GameScene: React.FC<GameSceneProps> = ({
   }, [camera, size, gl, onSelectEntity, onSelectionChange, placementMode.active, commandMode.active]);
 
 
-  // Camera Pan Loop
+  // Camera Pan Loop (Keyboard only now)
   useFrame((state, delta) => {
     const PAN_SPEED = 30 * delta;
-    const EDGE_THRESHOLD = 0.98; // Less sensitive edge scroll
-    const { pointer, camera } = state;
-
+    
     let moveX = 0;
     let moveZ = 0;
 
@@ -305,12 +385,6 @@ export const GameScene: React.FC<GameSceneProps> = ({
     if (keysPressed.current['KeyS'] || keysPressed.current['ArrowDown']) moveZ += 1;
     if (keysPressed.current['KeyA'] || keysPressed.current['ArrowLeft']) moveX -= 1;
     if (keysPressed.current['KeyD'] || keysPressed.current['ArrowRight']) moveX += 1;
-
-    // Edge Scrolling
-    if (pointer.x > EDGE_THRESHOLD) moveX += 1;
-    if (pointer.x < -EDGE_THRESHOLD) moveX -= 1;
-    if (pointer.y > EDGE_THRESHOLD) moveZ -= 1; 
-    if (pointer.y < -EDGE_THRESHOLD) moveZ += 1;
 
     if (moveX !== 0 || moveZ !== 0) {
         const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
@@ -412,12 +486,16 @@ export const GameScene: React.FC<GameSceneProps> = ({
                  e.stopPropagation();
                  const color = commandMode.type === 'ATTACK_MOVE' ? '#ef4444' : '#3b82f6';
                  spawnMarker(hoverPos, color);
-                 onAttackMove(hoverPos); // We reuse the handler for both, App handles difference based on state
+                 onAttackMove(hoverPos); 
              }
         }}
         onContextMenu={(e) => {
              e.stopPropagation(); 
              e.nativeEvent.preventDefault(); 
+             if (ignoreNextContextMenu.current) {
+                 ignoreNextContextMenu.current = false;
+                 return;
+             }
              spawnMarker(e.point, '#00ff00');
              onRightClickGround(e.point);
         }}
@@ -462,6 +540,10 @@ export const GameScene: React.FC<GameSceneProps> = ({
             onContextMenu={(e) => {
                 e.stopPropagation();
                 e.nativeEvent.preventDefault();
+                if (ignoreNextContextMenu.current) {
+                    ignoreNextContextMenu.current = false;
+                    return;
+                }
                 if (entity.visible) {
                     spawnMarker(new THREE.Vector3(entity.position.x, entity.position.y, entity.position.z), '#ef4444');
                     onRightClickEntity(entity.id);
