@@ -23,7 +23,9 @@ export enum BuildingType {
 
 export enum ResourceType {
   GOLD = 'Gold',
-  WOOD = 'Wood'
+  WOOD = 'Wood',
+  STONE = 'Stone',
+  IRON = 'Iron'
 }
 
 export enum UpgradeType {
@@ -120,7 +122,7 @@ export interface GameStats {
   unitsTrained: number;
   unitsLost: number;
   enemiesKilled: number;
-  resourcesGathered: { gold: number; wood: number };
+  resourcesGathered: { gold: number; wood: number; stone: number; iron: number };
   timeElapsed: number;
 }
 
@@ -128,6 +130,8 @@ export interface GameState {
   resources: {
     gold: number;
     wood: number;
+    stone: number;
+    iron: number;
     food: number;
     maxFood: number;
   };

@@ -1,4 +1,5 @@
 
+
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
@@ -167,7 +168,14 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
           <group position={[0, 1.6, 0]}>
                <mesh>
                    <sphereGeometry args={[0.2, 8, 8]} />
-                   <meshStandardMaterial color={entity.carryType === ResourceType.GOLD ? "#fbbf24" : "#5D4037"} />
+                   <meshStandardMaterial 
+                      color={
+                        entity.carryType === ResourceType.GOLD ? "#fbbf24" : 
+                        entity.carryType === ResourceType.IRON ? "#78350f" : 
+                        entity.carryType === ResourceType.STONE ? "#6b7280" : 
+                        "#5D4037"
+                      } 
+                   />
                </mesh>
           </group>
       )}
@@ -243,6 +251,8 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
 
 export const Resource3D: React.FC<EntityProps> = ({ entity }) => {
   const isGold = entity.subType === ResourceType.GOLD;
+  const isStone = entity.subType === ResourceType.STONE;
+  const isIron = entity.subType === ResourceType.IRON;
 
   if (!entity.visible) return null;
 
@@ -260,8 +270,36 @@ export const Resource3D: React.FC<EntityProps> = ({ entity }) => {
           <dodecahedronGeometry args={[1.2, 0]} />
           <meshStandardMaterial color="#fbbf24" metalness={0.8} roughness={0.2} emissive="#f59e0b" emissiveIntensity={0.2} />
         </mesh>
+      ) : isStone ? (
+        <group>
+            {/* Stone Quarry Visual: Cluster of grey rocks */}
+            <mesh position={[-0.5, 0.6, 0]} castShadow>
+                <dodecahedronGeometry args={[0.8, 0]} />
+                <meshStandardMaterial color="#6b7280" roughness={0.9} />
+            </mesh>
+            <mesh position={[0.6, 0.4, 0.4]} castShadow rotation={[0, 1, 0]}>
+                <dodecahedronGeometry args={[0.6, 0]} />
+                <meshStandardMaterial color="#4b5563" roughness={0.9} />
+            </mesh>
+            <mesh position={[0.2, 0.5, -0.6]} castShadow rotation={[1, 0, 0]}>
+                <icosahedronGeometry args={[0.5, 0]} />
+                <meshStandardMaterial color="#9ca3af" roughness={0.9} />
+            </mesh>
+        </group>
+      ) : isIron ? (
+        <group>
+             {/* Iron Deposit: Angular, metallic, rust colored */}
+            <mesh position={[0, 0.8, 0]} castShadow>
+                <octahedronGeometry args={[1.2, 0]} />
+                <meshStandardMaterial color="#78350f" metalness={0.7} roughness={0.4} />
+            </mesh>
+            <mesh position={[0, 1.0, 0]}>
+                <pointLight distance={3} intensity={0.5} color="#f97316" />
+            </mesh>
+        </group>
       ) : (
         <group>
+            {/* Tree */}
             <mesh position={[0, 1, 0]} castShadow>
                 <cylinderGeometry args={[0.3, 0.4, 2, 6]} />
                 <meshStandardMaterial color="#3e2723" />

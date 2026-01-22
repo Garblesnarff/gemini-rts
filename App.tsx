@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { v4 as uuidv4 } from 'uuid';
@@ -7,26 +8,70 @@ import * as THREE from 'three';
 import { GameScene } from './components/GameScene';
 import { UIOverlay } from './components/UIOverlay';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType, UpgradeType } from './types';
-import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE, MAX_WAVES, MAP_SIZE } from './constants';
+import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE, MAX_WAVES, MAP_SIZE, ENEMY_SPAWN_POINTS } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
-const INITIAL_ENTITIES: Entity[] = [
-  { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: 0, y: 0, z: 0 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0, visible: true, productionQueue: [], rallyPoint: null },
-  { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: 5, y: 0, z: 5 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0, visible: true },
-  
-  { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 10, y: 0, z: -5 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
-  { id: 'tr-1', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -8, y: 0, z: -8 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Ancient Oak', lastAttackTime: 0, visible: true },
-  { id: 'tr-2', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -10, y: 0, z: -6 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Pine Tree', lastAttackTime: 0, visible: true },
-  { id: 'tr-3', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -12, y: 0, z: -9 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Birch', lastAttackTime: 0, visible: true },
-  
-  { id: 'tr-4', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: -15, y: 0, z: 10 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0, visible: true },
-  { id: 'tr-5', type: EntityType.RESOURCE, subType: ResourceType.WOOD, faction: Faction.NEUTRAL, position: { x: 15, y: 0, z: 12 }, hp: 100, maxHp: 100, resourceAmount: 500, name: 'Forest', lastAttackTime: 0, visible: true },
-];
+// --- Map Generation Helper ---
+const generateForest = (centerX: number, centerZ: number, count: number, namePrefix: string): Entity[] => {
+    const trees: Entity[] = [];
+    for (let i = 0; i < count; i++) {
+        const offsetX = (Math.random() - 0.5) * 16;
+        const offsetZ = (Math.random() - 0.5) * 16;
+        trees.push({
+            id: uuidv4(),
+            type: EntityType.RESOURCE,
+            subType: ResourceType.WOOD,
+            faction: Faction.NEUTRAL,
+            position: { x: centerX + offsetX, y: 0, z: centerZ + offsetZ },
+            hp: 100,
+            maxHp: 100,
+            resourceAmount: 500,
+            name: `${namePrefix} Tree`,
+            lastAttackTime: 0,
+            visible: true
+        });
+    }
+    return trees;
+};
+
+// --- Initial Map Data ---
+const buildInitialMap = (): Entity[] => {
+    const entities: Entity[] = [
+        // Player Start
+        { id: 'th-1', type: EntityType.BUILDING, subType: BuildingType.TOWN_HALL, faction: Faction.PLAYER, position: { x: -60, y: 0, z: -60 }, hp: 1500, maxHp: 1500, name: 'Main Keep', lastAttackTime: 0, visible: true, productionQueue: [], rallyPoint: null },
+        { id: 'p-1', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: -55, y: 0, z: -55 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant John', lastAttackTime: 0, visible: true },
+        { id: 'p-2', type: EntityType.UNIT, subType: UnitType.PEASANT, faction: Faction.PLAYER, position: { x: -55, y: 0, z: -65 }, hp: 220, maxHp: 220, state: 'idle', name: 'Peasant Mike', lastAttackTime: 0, visible: true },
+        { id: 'f-1', type: EntityType.UNIT, subType: UnitType.FOOTMAN, faction: Faction.PLAYER, position: { x: -65, y: 0, z: -55 }, hp: 420, maxHp: 420, state: 'idle', name: 'Guard', lastAttackTime: 0, visible: true },
+
+        // Gold Mines
+        { id: 'gm-1', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: -50, y: 0, z: -50 }, hp: 15000, maxHp: 15000, resourceAmount: 15000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
+        { id: 'gm-2', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 0, y: 0, z: 0 }, hp: 15000, maxHp: 15000, resourceAmount: 15000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
+        { id: 'gm-3', type: EntityType.RESOURCE, subType: ResourceType.GOLD, faction: Faction.NEUTRAL, position: { x: 60, y: 0, z: 60 }, hp: 15000, maxHp: 15000, resourceAmount: 15000, name: 'Gold Mine', lastAttackTime: 0, visible: true },
+
+        // Stone Quarries
+        { id: 'sq-1', type: EntityType.RESOURCE, subType: ResourceType.STONE, faction: Faction.NEUTRAL, position: { x: -30, y: 0, z: -20 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Stone Quarry', lastAttackTime: 0, visible: true },
+        { id: 'sq-2', type: EntityType.RESOURCE, subType: ResourceType.STONE, faction: Faction.NEUTRAL, position: { x: 30, y: 0, z: -30 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Stone Quarry', lastAttackTime: 0, visible: true },
+        { id: 'sq-3', type: EntityType.RESOURCE, subType: ResourceType.STONE, faction: Faction.NEUTRAL, position: { x: 50, y: 0, z: 20 }, hp: 10000, maxHp: 10000, resourceAmount: 10000, name: 'Stone Quarry', lastAttackTime: 0, visible: true },
+
+        // Iron Deposits
+        { id: 'ir-1', type: EntityType.RESOURCE, subType: ResourceType.IRON, faction: Faction.NEUTRAL, position: { x: 20, y: 0, z: 40 }, hp: 8000, maxHp: 8000, resourceAmount: 8000, name: 'Iron Deposit', lastAttackTime: 0, visible: true },
+        { id: 'ir-2', type: EntityType.RESOURCE, subType: ResourceType.IRON, faction: Faction.NEUTRAL, position: { x: -40, y: 0, z: 60 }, hp: 8000, maxHp: 8000, resourceAmount: 8000, name: 'Iron Deposit', lastAttackTime: 0, visible: true },
+    ];
+
+    // Forests
+    entities.push(...generateForest(-70, -40, 8, "Ancient"));
+    entities.push(...generateForest(-20, -70, 10, "Southern"));
+    entities.push(...generateForest(10, 10, 12, "Central"));
+    entities.push(...generateForest(60, -20, 8, "Eastern"));
+    entities.push(...generateForest(-30, 70, 15, "Northern"));
+
+    return entities;
+};
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>({
-    resources: { gold: 200, wood: 100, food: 1, maxFood: 10 },
-    entities: INITIAL_ENTITIES,
+    resources: { gold: 200, wood: 100, stone: 0, iron: 0, food: 1, maxFood: 10 },
+    entities: buildInitialMap(),
     projectiles: [],
     floatingTexts: [],
     selection: [],
@@ -42,13 +87,14 @@ export default function App() {
         unitsTrained: 0,
         unitsLost: 0,
         enemiesKilled: 0,
-        resourcesGathered: { gold: 0, wood: 0 },
+        resourcesGathered: { gold: 0, wood: 0, stone: 0, iron: 0 },
         timeElapsed: 0
     }
   });
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
-  const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(null);
+  // Initialize camera target to player base
+  const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(new THREE.Vector3(-60, 0, -60));
 
   const waveTimerRef = useRef(0);
   const nextWaveTimeRef = useRef(60);
@@ -598,10 +644,21 @@ export default function App() {
                     const spawnCount = Math.floor(currentWave * 2) + 1;
                     messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
                     
+                    // Determine active spawn points based on wave progress
+                    let activeSpawns = [ENEMY_SPAWN_POINTS[0]]; // Always North
+                    if (currentWave > 3) activeSpawns.push(ENEMY_SPAWN_POINTS[1]); // East
+                    if (currentWave > 6) activeSpawns.push(ENEMY_SPAWN_POINTS[3]); // South East
+                    if (currentWave === MAX_WAVES) activeSpawns = ENEMY_SPAWN_POINTS; // All sides
+
                     for(let i=0; i<spawnCount; i++) {
-                        const angle = Math.random() * Math.PI * 2;
-                        const r = 50;
-                        const spawnPos = { x: Math.cos(angle) * r, y: 0, z: Math.sin(angle) * r };
+                        const spawnPoint = activeSpawns[Math.floor(Math.random() * activeSpawns.length)];
+                        // Add slight jitter
+                        const spawnPos = { 
+                            x: spawnPoint.x + (Math.random() - 0.5) * 10, 
+                            y: 0, 
+                            z: spawnPoint.z + (Math.random() - 0.5) * 10 
+                        };
+                        
                         newEntities.push({
                             id: uuidv4(),
                             type: EntityType.UNIT,
@@ -835,7 +892,7 @@ export default function App() {
                         let closest = null;
                         let minDst = Infinity;
                         for (const other of prev.entities) {
-                            if (other.faction === Faction.PLAYER) {
+                            if (other.faction === Faction.PLAYER && other.hp > 0) {
                                 const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
                                 if (d < minDst) {
                                     minDst = d;
@@ -843,12 +900,19 @@ export default function App() {
                                 }
                             }
                         }
-                        if (closest && minDst < 12) {
+                        
+                        if (closest) {
+                            if (minDst < AGGRO_RANGE) {
+                                 hasChanges = true;
+                                 return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null, position: pos };
+                            } else {
+                                 // Pathfind towards closest target
+                                 hasChanges = true;
+                                 return { ...entity, state: 'moving', targetPos: closest.position, position: pos }; 
+                            }
+                        } else if (!entity.targetPos) {
                              hasChanges = true;
-                             return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null, position: pos };
-                        } else if (!entity.targetPos && !closest) {
-                             hasChanges = true;
-                             return { ...entity, state: 'moving', targetPos: {x:0,y:0,z:0}, position: pos }; 
+                             return { ...entity, state: 'moving', targetPos: {x:-60,y:0,z:-60}, position: pos }; // Move towards player base
                         }
                     }
                 }
@@ -966,15 +1030,29 @@ export default function App() {
                          pos.z += (dz/dist) * speed;
                          return { ...entity, position: pos };
                      } else {
+                         const amount = entity.carryAmount || 0;
                          if (entity.carryType === ResourceType.GOLD) {
-                             newResources.gold += (entity.carryAmount || 0);
-                             newStats.resourcesGathered.gold += (entity.carryAmount || 0);
+                             newResources.gold += amount;
+                             newStats.resourcesGathered.gold += amount;
                          }
                          if (entity.carryType === ResourceType.WOOD) {
-                             newResources.wood += (entity.carryAmount || 0);
-                             newStats.resourcesGathered.wood += (entity.carryAmount || 0);
+                             newResources.wood += amount;
+                             newStats.resourcesGathered.wood += amount;
                          }
-                         newFloatingTexts.push({ id: uuidv4(), text: `+${entity.carryAmount}`, position: {x: pos.x, y: 3, z: pos.z}, color: '#fbbf24', life: 1 });
+                         if (entity.carryType === ResourceType.STONE) {
+                             newResources.stone += amount;
+                             newStats.resourcesGathered.stone += amount;
+                         }
+                         if (entity.carryType === ResourceType.IRON) {
+                             newResources.iron += amount;
+                             newStats.resourcesGathered.iron += amount;
+                         }
+                         
+                         const color = entity.carryType === ResourceType.GOLD ? '#fbbf24' : 
+                                       entity.carryType === ResourceType.IRON ? '#f97316' : 
+                                       entity.carryType === ResourceType.STONE ? '#9ca3af' : '#166534';
+
+                         newFloatingTexts.push({ id: uuidv4(), text: `+${amount}`, position: {x: pos.x, y: 3, z: pos.z}, color, life: 1 });
                          hasChanges = true;
                          if (entity.lastResourceId) {
                              return { ...entity, position: pos, state: 'gathering', targetId: entity.lastResourceId, carryAmount: 0, carryType: undefined };

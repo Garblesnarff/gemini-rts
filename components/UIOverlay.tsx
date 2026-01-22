@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { 
   Coins, 
@@ -18,7 +19,9 @@ import {
   Shield,
   ArrowUp,
   CircleStop,
-  Hand
+  Hand,
+  Mountain,
+  Triangle
 } from 'lucide-react';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, UpgradeType } from '../types';
 import { COSTS, UNIT_STATS, MAP_SIZE } from '../constants';
@@ -95,30 +98,41 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between font-ui text-white">
       
       {/* Top Bar: Resources */}
-      <div className="h-12 bg-wood-900 border-b-4 border-gold-600 flex items-center px-4 space-x-8 shadow-lg pointer-events-auto select-none">
+      <div className="h-12 bg-wood-900 border-b-4 border-gold-600 flex items-center px-4 space-x-6 shadow-lg pointer-events-auto select-none overflow-x-auto">
         <div className="flex items-center space-x-2 text-gold-400">
-          <Coins size={20} />
+          <Coins size={18} />
           <span className="font-bold tracking-wider">{Math.floor(gameState.resources.gold)}</span>
         </div>
         <div className="flex items-center space-x-2 text-green-400">
-          <Trees size={20} />
+          <Trees size={18} />
           <span className="font-bold tracking-wider">{Math.floor(gameState.resources.wood)}</span>
         </div>
+         <div className="flex items-center space-x-2 text-gray-400">
+          <Mountain size={18} />
+          <span className="font-bold tracking-wider">{Math.floor(gameState.resources.stone)}</span>
+        </div>
+         <div className="flex items-center space-x-2 text-orange-900">
+          <Triangle size={18} fill="currentColor" />
+          <span className="font-bold tracking-wider text-orange-400">{Math.floor(gameState.resources.iron)}</span>
+        </div>
+
+        <div className="w-[1px] h-6 bg-gray-600 mx-2"></div>
+
         <div className="flex items-center space-x-2 text-red-400">
-          <Utensils size={20} />
+          <Utensils size={18} />
           <span className="font-bold tracking-wider">{gameState.resources.food} / {gameState.resources.maxFood}</span>
         </div>
-        <div className="flex items-center space-x-2 text-purple-400 ml-4">
-          <Skull size={20} />
+        <div className="flex items-center space-x-2 text-purple-400">
+          <Skull size={18} />
           <span className="font-bold tracking-wider">Wave {gameState.wave}</span>
         </div>
 
-        <div className="flex-1 text-center font-fantasy text-gold-500 text-xl tracking-widest opacity-80">
+        <div className="flex-1 text-center font-fantasy text-gold-500 text-xl tracking-widest opacity-80 hidden md:block">
           Realm of Aethelgard
         </div>
         <button 
           onClick={onGetAdvisor}
-          className="flex items-center space-x-1 px-3 py-1 bg-purple-900 hover:bg-purple-800 border border-purple-500 rounded text-xs transition-colors"
+          className="flex items-center space-x-1 px-3 py-1 bg-purple-900 hover:bg-purple-800 border border-purple-500 rounded text-xs transition-colors whitespace-nowrap"
         >
           <Sparkles size={14} />
           <span>Royal Advisor</span>

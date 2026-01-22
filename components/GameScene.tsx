@@ -6,7 +6,7 @@ import { OrbitControls, Environment, Sky, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Entity, EntityType, BuildingType, PlacementMode, Projectile, FloatingText, Faction, CommandMode } from '../types';
 import { Unit3D, Building3D, Resource3D, Projectile3D, FloatingText3D, RallyPoint3D } from './WorldEntities';
-import { UNIT_STATS, DRAG_THRESHOLD } from '../constants';
+import { UNIT_STATS, DRAG_THRESHOLD, MAP_SIZE } from '../constants';
 
 interface GameSceneProps {
   entities: Entity[];
@@ -77,15 +77,42 @@ const ClickMarker: React.FC<{ position: THREE.Vector3, color?: string }> = ({ po
 };
 
 const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
-    const GRID_SIZE = 128;
-    const WORLD_SIZE = 120;
+    const GRID_SIZE = 256; 
+    const WORLD_SIZE = MAP_SIZE;
     
-    const data = useMemo(() => new Uint8Array(GRID_SIZE * GRID_SIZE).fill(0), []);
-    const textureRef = useRef<THREE.DataTexture>(null);
+    // Create texture and data buffer once.
+    const { texture, data } = useMemo(() => {
+        // RGBA (4 bytes per pixel)
+        const d = new Uint8Array(GRID_SIZE * GRID_SIZE * 4).fill(0);
+        
+        // Initial visibility for player start area (-60, -60)
+        // Map: (-100, -100) to (100, 100)
+        
+        const startX = 51; 
+        const startY = 204;
+        const radius = 30; 
+
+        for(let y=0; y<GRID_SIZE; y++) {
+            for(let x=0; x<GRID_SIZE; x++) {
+                const dx = x - startX;
+                const dy = y - startY;
+                if(dx*dx + dy*dy < radius*radius) {
+                    const i = (y * GRID_SIZE + x) * 4;
+                    d[i] = 255; // R channel
+                }
+            }
+        }
+
+        const t = new THREE.DataTexture(d, GRID_SIZE, GRID_SIZE, THREE.RGBAFormat, THREE.UnsignedByteType);
+        t.magFilter = THREE.LinearFilter;
+        t.minFilter = THREE.LinearFilter;
+        t.needsUpdate = true;
+        return { texture: t, data: d };
+    }, []);
 
     const shaderMaterial = useMemo(() => new THREE.ShaderMaterial({
         uniforms: {
-            uFogMap: { value: null }
+            uFogMap: { value: texture }
         },
         vertexShader: `
             varying vec2 vUv;
@@ -98,6 +125,7 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
             uniform sampler2D uFogMap;
             varying vec2 vUv;
             void main() {
+                // Read from R channel
                 float v = texture2D(uFogMap, vUv).r;
                 float finalAlpha = 1.0;
                 if (v > 0.9) {
@@ -110,42 +138,47 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
         `,
         transparent: true,
         depthWrite: false,
-    }), []);
+    }), [texture]);
 
     useFrame(() => {
-        if (!textureRef.current) return;
-
-        // 1. Fade active vision to "Explored" (128)
-        for (let i = 0; i < data.length; i++) {
+        // 1. Decay visibility: Active (255) -> Explored (128)
+        // Stride 4 for RGBA
+        for (let i = 0; i < data.length; i+=4) {
             if (data[i] > 128) data[i] = 128; 
         }
 
-        // 2. Project current vision from Player entities
+        // 2. Paint new visibility
         const playerEntities = entities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
         
         playerEntities.forEach(e => {
             const stats = UNIT_STATS[e.subType as keyof typeof UNIT_STATS];
-            const range = stats?.visionRange || 8;
+            const range = stats?.visionRange || 10;
             
-            // X Mapping: -60 to 60 -> 0 to 127
-            const gridX = Math.floor(((e.position.x + 60) / 120) * (GRID_SIZE - 1));
-            const gridY = Math.floor(((60 - e.position.z) / 120) * (GRID_SIZE - 1));
-            const gridRange = Math.ceil((range / 120) * GRID_SIZE);
+            // Map coordinates [-100, 100] to [0, GRID_SIZE-1]
+            const gridX = Math.floor(((e.position.x + (WORLD_SIZE/2)) / WORLD_SIZE) * (GRID_SIZE - 1));
+            // Invert Z for Grid Y (Top of map is North/-Z is High Y index in this mapping)
+            const gridY = Math.floor((((WORLD_SIZE/2) - e.position.z) / WORLD_SIZE) * (GRID_SIZE - 1));
+            const gridRange = Math.ceil((range / WORLD_SIZE) * GRID_SIZE);
 
-            for (let y = -gridRange; y <= gridRange; y++) {
-                for (let x = -gridRange; x <= gridRange; x++) {
-                    if (x*x + y*y <= gridRange*gridRange) {
-                        const px = gridX + x;
-                        const py = gridY + y;
-                        if (px >= 0 && px < GRID_SIZE && py >= 0 && py < GRID_SIZE) {
-                            data[py * GRID_SIZE + px] = 255;
-                        }
+            // Simple Bounding Box + Circle check
+            const minX = Math.max(0, gridX - gridRange);
+            const maxX = Math.min(GRID_SIZE - 1, gridX + gridRange);
+            const minY = Math.max(0, gridY - gridRange);
+            const maxY = Math.min(GRID_SIZE - 1, gridY + gridRange);
+
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    const dx = x - gridX;
+                    const dy = y - gridY;
+                    if (dx*dx + dy*dy <= gridRange*gridRange) {
+                        const i = (y * GRID_SIZE + x) * 4;
+                        data[i] = 255;
                     }
                 }
             }
         });
 
-        textureRef.current.needsUpdate = true;
+        texture.needsUpdate = true;
     });
 
     return (
@@ -155,15 +188,7 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
             raycast={() => null}
         >
             <planeGeometry args={[WORLD_SIZE, WORLD_SIZE]} />
-            <primitive object={shaderMaterial} attach="material">
-                <dataTexture 
-                    ref={textureRef}
-                    attach="uniforms-uFogMap-value"
-                    args={[data, GRID_SIZE, GRID_SIZE, THREE.RedFormat, THREE.UnsignedByteType]}
-                    magFilter={THREE.LinearFilter}
-                    minFilter={THREE.LinearFilter}
-                />
-            </primitive>
+            <primitive object={shaderMaterial} attach="material" />
         </mesh>
     );
 };
@@ -171,7 +196,7 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
 
 export const GameScene: React.FC<GameSceneProps> = ({ 
   entities, 
-  projectiles,
+  projectiles, 
   floatingTexts,
   placementMode,
   commandMode,
@@ -209,7 +234,8 @@ export const GameScene: React.FC<GameSceneProps> = ({
   useEffect(() => {
     if (cameraTarget && controlsRef.current) {
         controlsRef.current.target.set(cameraTarget.x, 0, cameraTarget.z);
-        camera.position.set(cameraTarget.x + 20, 25, cameraTarget.z + 20);
+        // Only update Y if it's too zoomed out or in, optional, but we keep X/Z sync
+        // camera.position.set(cameraTarget.x + 20, 45, cameraTarget.z + 20); // Removed to allow smooth panning without snapping height
         controlsRef.current.update();
     }
   }, [cameraTarget, camera]);
@@ -234,6 +260,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
         if (e.button === 2) { // Right Click
             rightDragStart.current = { x: e.clientX, y: e.clientY };
             isRightPanning.current = false;
+            ignoreNextContextMenu.current = false; // Reset flag to ensure clicks work
             panStartCamPos.current.copy(camera.position);
             if (controlsRef.current) {
                 panStartTarget.current.copy(controlsRef.current.target);
@@ -375,7 +402,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
 
   // Camera Pan Loop (Keyboard only now)
   useFrame((state, delta) => {
-    const PAN_SPEED = 30 * delta;
+    const PAN_SPEED = 40 * delta;
     
     let moveX = 0;
     let moveZ = 0;
@@ -400,7 +427,8 @@ export const GameScene: React.FC<GameSceneProps> = ({
             const targetX = target.x + moveX * PAN_SPEED;
             const targetZ = target.z + moveZ * PAN_SPEED;
             
-            const BOUNDS = 50;
+            // Bounds updated for 200x200 map
+            const BOUNDS = 90;
             const clampedTargetX = Math.max(-BOUNDS, Math.min(BOUNDS, targetX));
             const clampedTargetZ = Math.max(-BOUNDS, Math.min(BOUNDS, targetZ));
             
@@ -446,7 +474,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
         makeDefault 
         minPolarAngle={0} 
         maxPolarAngle={Math.PI / 2.2} 
-        maxDistance={80}
+        maxDistance={120}
         minDistance={10}
         mouseButtons={{
           LEFT: THREE.MOUSE.PAN, 
@@ -459,13 +487,13 @@ export const GameScene: React.FC<GameSceneProps> = ({
       
       <ambientLight intensity={0.6} color="#dbeafe" />
       <directionalLight 
-        position={[50, 50, 25]} 
+        position={[80, 80, 40]} 
         intensity={1.5} 
         castShadow 
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0005}
       >
-        <orthographicCamera attach="shadow-camera" args={[-60, 60, 60, -60]} />
+        <orthographicCamera attach="shadow-camera" args={[-100, 100, 100, -100]} />
       </directionalLight>
 
       <Environment preset="park" />
@@ -500,7 +528,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
              onRightClickGround(e.point);
         }}
       >
-        <planeGeometry args={[120, 120]} />
+        <planeGeometry args={[MAP_SIZE, MAP_SIZE]} />
         <meshStandardMaterial color="#4d7c0f" roughness={1} />
       </mesh>
 
@@ -520,7 +548,7 @@ export const GameScene: React.FC<GameSceneProps> = ({
           </mesh>
        )}
 
-      <gridHelper args={[120, 60, 0x000000, 0x000000]} position={[0, 0.01, 0]} raycast={() => null}>
+      <gridHelper args={[MAP_SIZE, 40, 0x000000, 0x000000]} position={[0, 0.01, 0]} raycast={() => null}>
          <meshBasicMaterial attach="material" color="black" transparent opacity={0.1} />
       </gridHelper>
 
