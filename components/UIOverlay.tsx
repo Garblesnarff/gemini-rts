@@ -21,13 +21,15 @@ import {
   CircleStop,
   Hand,
   Mountain,
-  Triangle
+  Triangle,
+  Hourglass
 } from 'lucide-react';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, UpgradeType } from '../types';
 import { COSTS, UNIT_STATS, MAP_SIZE } from '../constants';
 
 interface UIOverlayProps {
   gameState: GameState;
+  timeToNextWave?: number;
   onTrainUnit: (type: UnitType) => void;
   onResearch: (type: UpgradeType) => void;
   onBuild: (type: BuildingType) => void;
@@ -60,6 +62,7 @@ const Portrait = ({ type }: { type: string }) => {
 
 export const UIOverlay: React.FC<UIOverlayProps> = ({ 
   gameState, 
+  timeToNextWave,
   onTrainUnit, 
   onResearch,
   onBuild,
@@ -80,12 +83,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const u = (e.clientX - rect.left) / rect.width;
     const v = (e.clientY - rect.top) / rect.height;
-    
-    // Invert Y logic if needed? 
-    // World coordinates: +Z is "down" in 2D map usually, but in ThreeJS +Z is towards camera.
-    // Minimap Rendering logic below uses `(position.z + MAP_SIZE/2)`.
-    // So 0,0 is at u=0.5, v=0.5.
-    // We pass U,V 0..1
     
     if (e.button === 2) {
         onMinimapCommand(u, v);
@@ -126,6 +123,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
           <Skull size={18} />
           <span className="font-bold tracking-wider">Wave {gameState.wave}</span>
         </div>
+        {timeToNextWave !== undefined && (
+             <div className="flex items-center space-x-1 text-gray-400 text-sm">
+                <Hourglass size={14} />
+                <span>{timeToNextWave}s</span>
+             </div>
+        )}
 
         <div className="flex-1 text-center font-fantasy text-gold-500 text-xl tracking-widest opacity-80 hidden md:block">
           Realm of Aethelgard

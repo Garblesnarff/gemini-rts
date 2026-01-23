@@ -93,11 +93,11 @@ export default function App() {
   });
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
-  // Initialize camera target to player base
   const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(new THREE.Vector3(-60, 0, -60));
+  const [timeToNextWave, setTimeToNextWave] = useState(120);
 
   const waveTimerRef = useRef(0);
-  const nextWaveTimeRef = useRef(60);
+  const nextWaveTimeRef = useRef(120); // 2 minutes for first wave
   const lastKeyTimeRef = useRef<{key: string, time: number}>({ key: '', time: 0 });
 
   const addMessage = useCallback((text: string, type: 'info' | 'alert' | 'lore' = 'info') => {
@@ -637,10 +637,21 @@ export default function App() {
 
             // 1. WAVE LOGIC
             waveTimerRef.current += deltaSeconds;
+            // Update time display periodically (every 1s roughly)
+            if (Math.floor(waveTimerRef.current) % 1 === 0) {
+                 const remaining = Math.max(0, Math.ceil(nextWaveTimeRef.current - waveTimerRef.current));
+                 // State update inside loop is risky, better to compute derived or throttle
+                 // We will update it only if difference is significant to avoid spamming state updates
+                 // Actually, setTimeToNextWave is state, we shouldn't call it deep in a fast loop if possible
+                 // But for simplicity, we do it here, React batches.
+                 setTimeToNextWave(remaining); 
+            }
+
             if (waveTimerRef.current >= nextWaveTimeRef.current) {
                 if (currentWave < MAX_WAVES) {
                     waveTimerRef.current = 0;
                     currentWave++;
+                    nextWaveTimeRef.current = 90; // Subsequent waves every 90s
                     const spawnCount = Math.floor(currentWave * 2) + 1;
                     messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
                     
@@ -792,30 +803,33 @@ export default function App() {
 
             const resourceMap: Record<string, number> = {}; 
 
-            // Entity Logic Loop
+            // Entity Logic Loop (Refactored to avoid early returns skipping movement)
             newEntities = newEntities.map(entity => {
                 const CARRY_CAPACITY = 10;
                 const TICK_SPEED = 0.033;
-                let pos = { ...entity.position };
-                const stats = getStats(entity.subType as UnitType);
+                
+                // Create a mutable copy for this logic pass
+                let currentEntity = { ...entity };
+                let pos = { ...currentEntity.position };
+                const stats = getStats(currentEntity.subType as UnitType);
 
                 // Update MaxHP dynamically if upgrade just finished
-                if (entity.faction === Faction.PLAYER && entity.type === EntityType.UNIT) {
-                    if (entity.maxHp < stats.hp) {
+                if (currentEntity.faction === Faction.PLAYER && currentEntity.type === EntityType.UNIT) {
+                    if (currentEntity.maxHp < stats.hp) {
                          hasChanges = true;
-                         return { ...entity, maxHp: stats.hp };
+                         currentEntity.maxHp = stats.hp;
                     }
                 }
 
-                // Unit Separation
-                if (entity.type === EntityType.UNIT && (entity.state === 'moving' || entity.state === 'attacking' || entity.state === 'gathering' || entity.state === 'returning')) {
+                // Unit Separation (Updates pos)
+                if (currentEntity.type === EntityType.UNIT && (currentEntity.state === 'moving' || currentEntity.state === 'attacking' || currentEntity.state === 'gathering' || currentEntity.state === 'returning')) {
                     const separationRadius = 1.0;
                     let moveX = 0, moveZ = 0;
                     let count = 0;
                     prev.entities.forEach(other => {
-                        if (entity.id !== other.id && other.type === EntityType.UNIT) {
-                            const dx = entity.position.x - other.position.x;
-                            const dz = entity.position.z - other.position.z;
+                        if (currentEntity.id !== other.id && other.type === EntityType.UNIT) {
+                            const dx = currentEntity.position.x - other.position.x;
+                            const dz = currentEntity.position.z - other.position.z;
                             const dSq = dx*dx + dz*dz;
                             if (dSq < separationRadius * separationRadius && dSq > 0.001) {
                                 const d = Math.sqrt(dSq);
@@ -834,18 +848,18 @@ export default function App() {
                 }
 
                 // --- AUTO RETALIATION & ATTACK MOVE SCANNING ---
-                if (entity.type === EntityType.UNIT && entity.faction === Faction.PLAYER) {
-                    const isAttackMove = entity.state === 'moving' && (entity.attackMoveDestination || entity.patrolPoints);
-                    const isIdle = entity.state === 'idle';
+                if (currentEntity.type === EntityType.UNIT && currentEntity.faction === Faction.PLAYER) {
+                    const isAttackMove = currentEntity.state === 'moving' && (currentEntity.attackMoveDestination || currentEntity.patrolPoints);
+                    const isIdle = currentEntity.state === 'idle';
 
-                    if ((isIdle || isAttackMove) && !entity.holdPosition) {
+                    if ((isIdle || isAttackMove) && !currentEntity.holdPosition) {
                         // Scan for enemies
                         let closestEnemy = null;
                         let minDst = AGGRO_RANGE;
                         
                         for(const other of prev.entities) {
                             if (other.faction === Faction.ENEMY && other.hp > 0 && other.visible) {
-                                const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
+                                const d = Math.sqrt(Math.pow(currentEntity.position.x - other.position.x, 2) + Math.pow(currentEntity.position.z - other.position.z, 2));
                                 if (d < minDst) {
                                     minDst = d;
                                     closestEnemy = other;
@@ -855,31 +869,19 @@ export default function App() {
 
                         if (closestEnemy) {
                             hasChanges = true;
-                            return { 
-                                ...entity, 
-                                state: 'attacking', 
-                                targetId: closestEnemy.id, 
-                                position: pos,
-                                // Maintain special movement states for after combat
-                                attackMoveDestination: entity.attackMoveDestination,
-                                patrolPoints: entity.patrolPoints,
-                                patrolIndex: entity.patrolIndex
-                            };
+                            currentEntity.state = 'attacking';
+                            currentEntity.targetId = closestEnemy.id;
+                            // Keep move dest if any
                         }
-                    } else if (entity.holdPosition && isIdle) {
-                        // Hold Position: Only attack if in range
+                    } else if (currentEntity.holdPosition && isIdle) {
                         const range = stats.range || 2;
                         for(const other of prev.entities) {
                             if (other.faction === Faction.ENEMY && other.hp > 0 && other.visible) {
-                                const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
+                                const d = Math.sqrt(Math.pow(currentEntity.position.x - other.position.x, 2) + Math.pow(currentEntity.position.z - other.position.z, 2));
                                 if (d <= range) {
                                     hasChanges = true;
-                                    return { 
-                                        ...entity, 
-                                        state: 'attacking', 
-                                        targetId: other.id, 
-                                        position: pos
-                                    };
+                                    currentEntity.state = 'attacking';
+                                    currentEntity.targetId = other.id;
                                 }
                             }
                         }
@@ -887,13 +889,13 @@ export default function App() {
                 }
                 
                 // --- ENEMY AI ---
-                if (entity.faction === Faction.ENEMY && entity.type === EntityType.UNIT) {
-                    if (entity.state === 'idle' || (entity.state === 'moving' && !entity.targetId)) {
+                if (currentEntity.faction === Faction.ENEMY && currentEntity.type === EntityType.UNIT) {
+                    if (currentEntity.state === 'idle' || (currentEntity.state === 'moving' && !currentEntity.targetId)) {
                         let closest = null;
                         let minDst = Infinity;
                         for (const other of prev.entities) {
                             if (other.faction === Faction.PLAYER && other.hp > 0) {
-                                const d = Math.sqrt(Math.pow(entity.position.x - other.position.x, 2) + Math.pow(entity.position.z - other.position.z, 2));
+                                const d = Math.sqrt(Math.pow(currentEntity.position.x - other.position.x, 2) + Math.pow(currentEntity.position.z - other.position.z, 2));
                                 if (d < minDst) {
                                     minDst = d;
                                     closest = other;
@@ -904,47 +906,52 @@ export default function App() {
                         if (closest) {
                             if (minDst < AGGRO_RANGE) {
                                  hasChanges = true;
-                                 return { ...entity, state: 'attacking', targetId: closest.id, targetPos: null, position: pos };
+                                 currentEntity.state = 'attacking';
+                                 currentEntity.targetId = closest.id;
+                                 currentEntity.targetPos = null;
                             } else {
-                                 // Pathfind towards closest target
                                  hasChanges = true;
-                                 return { ...entity, state: 'moving', targetPos: closest.position, position: pos }; 
+                                 currentEntity.state = 'moving';
+                                 currentEntity.targetPos = closest.position;
                             }
-                        } else if (!entity.targetPos) {
+                        } else if (!currentEntity.targetPos) {
                              hasChanges = true;
-                             return { ...entity, state: 'moving', targetPos: {x:-60,y:0,z:-60}, position: pos }; // Move towards player base
+                             currentEntity.state = 'moving';
+                             currentEntity.targetPos = {x:-60,y:0,z:-60}; // Move towards player base
                         }
                     }
                 }
                 
                 // Building Attack (Towers)
-                if (entity.subType === BuildingType.TOWER && entity.faction === Faction.PLAYER) {
-                    if (now - entity.lastAttackTime > stats.attackSpeed) {
+                if (currentEntity.subType === BuildingType.TOWER && currentEntity.faction === Faction.PLAYER) {
+                    if (now - currentEntity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
                          const target = prev.entities.find(e => {
                              if (e.faction !== Faction.ENEMY || !e.visible) return false;
-                             const d = Math.sqrt(Math.pow(entity.position.x - e.position.x, 2) + Math.pow(entity.position.z - e.position.z, 2));
+                             const d = Math.sqrt(Math.pow(currentEntity.position.x - e.position.x, 2) + Math.pow(currentEntity.position.z - e.position.z, 2));
                              return d <= range;
                          });
                          if (target) {
                              newProjectiles.push({
                                  id: uuidv4(),
-                                 startPos: { x: entity.position.x, y: 4, z: entity.position.z },
+                                 startPos: { x: currentEntity.position.x, y: 4, z: currentEntity.position.z },
                                  targetId: target.id,
                                  speed: 0.1,
                                  progress: 0,
                                  damage: stats.damage
                              });
                              hasChanges = true;
-                             return { ...entity, lastAttackTime: now };
+                             currentEntity.lastAttackTime = now;
                          }
                     }
                 }
 
-                // Movement
-                if (entity.state === 'moving' && entity.targetPos) {
-                    const dx = entity.targetPos.x - pos.x;
-                    const dz = entity.targetPos.z - pos.z;
+                // --- MOVEMENT LOGIC ---
+                // Only process movement if state is moving and targetPos is set
+                // Note: We use currentEntity.state which might have been updated by AI above
+                if (currentEntity.state === 'moving' && currentEntity.targetPos) {
+                    const dx = currentEntity.targetPos.x - pos.x;
+                    const dz = currentEntity.targetPos.z - pos.z;
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     const speed = (stats.speed || 3) * TICK_SPEED;
                     
@@ -952,187 +959,189 @@ export default function App() {
                         hasChanges = true;
                         
                         // Patrol Logic
-                        if (entity.patrolPoints && entity.patrolIndex !== undefined) {
-                            const nextIndex = (entity.patrolIndex + 1) % 2;
-                            return { 
-                                ...entity, 
-                                position: pos, 
-                                patrolIndex: nextIndex, 
-                                targetPos: entity.patrolPoints[nextIndex] 
-                            };
+                        if (currentEntity.patrolPoints && currentEntity.patrolIndex !== undefined) {
+                            const nextIndex = (currentEntity.patrolIndex + 1) % 2;
+                            currentEntity.patrolIndex = nextIndex;
+                            currentEntity.targetPos = currentEntity.patrolPoints[nextIndex];
+                        } else {
+                            // Reached destination
+                            currentEntity.state = 'idle';
+                            currentEntity.targetPos = null;
+                            currentEntity.attackMoveDestination = null;
                         }
-
-                        // Reached destination. Clear attack move flag.
-                        return { ...entity, state: 'idle', targetPos: null, position: pos, attackMoveDestination: null };
                     } else {
                         hasChanges = true;
                         pos.x += (dx/dist) * speed;
                         pos.z += (dz/dist) * speed;
-                        return { ...entity, position: pos };
                     }
                 }
 
                 // Gathering
-                if (entity.state === 'gathering') {
-                    if ((entity.carryAmount || 0) >= CARRY_CAPACITY) {
+                if (currentEntity.state === 'gathering') {
+                    if ((currentEntity.carryAmount || 0) >= CARRY_CAPACITY) {
                         const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
                         if (townHall) {
                             hasChanges = true;
-                            return { ...entity, state: 'returning', targetId: townHall.id, position: pos };
+                            currentEntity.state = 'returning';
+                            currentEntity.targetId = townHall.id;
+                        } else {
+                            currentEntity.state = 'idle';
                         }
-                        return { ...entity, state: 'idle', position: pos };
-                    }
-                    const target = prev.entities.find(t => t.id === entity.targetId);
-                    if (!target || target.hp <= 0) {
-                         if ((entity.carryAmount || 0) > 0) {
-                             const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
-                             if (townHall) {
-                                 hasChanges = true;
-                                 return { ...entity, state: 'returning', targetId: townHall.id, lastResourceId: null, position: pos };
-                             }
-                        }
-                        return { ...entity, state: 'idle', position: pos };
-                    }
-                    const dx = target.position.x - pos.x;
-                    const dz = target.position.z - pos.z;
-                    const dist = Math.sqrt(dx*dx + dz*dz);
-                    if (dist > 2.5) {
-                         const speed = (stats.speed || 2.5) * TICK_SPEED;
-                         hasChanges = true;
-                         pos.x += (dx/dist) * speed;
-                         pos.z += (dz/dist) * speed;
-                         return { ...entity, position: pos };
                     } else {
-                        if (Math.random() > 0.90) { 
-                            const gatherAmount = 1;
-                            resourceMap[target.id] = (resourceMap[target.id] || 0) + gatherAmount;
-                            hasChanges = true;
-                            return { ...entity, position: pos, carryAmount: (entity.carryAmount || 0) + gatherAmount, carryType: target.subType as ResourceType };
+                        const target = prev.entities.find(t => t.id === currentEntity.targetId);
+                        if (!target || target.hp <= 0) {
+                             if ((currentEntity.carryAmount || 0) > 0) {
+                                 const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
+                                 if (townHall) {
+                                     hasChanges = true;
+                                     currentEntity.state = 'returning';
+                                     currentEntity.targetId = townHall.id;
+                                     currentEntity.lastResourceId = null;
+                                 } else {
+                                     currentEntity.state = 'idle';
+                                 }
+                            } else {
+                                currentEntity.state = 'idle';
+                            }
+                        } else {
+                            const dx = target.position.x - pos.x;
+                            const dz = target.position.z - pos.z;
+                            const dist = Math.sqrt(dx*dx + dz*dz);
+                            if (dist > 2.5) {
+                                 const speed = (stats.speed || 2.5) * TICK_SPEED;
+                                 hasChanges = true;
+                                 pos.x += (dx/dist) * speed;
+                                 pos.z += (dz/dist) * speed;
+                            } else {
+                                if (Math.random() > 0.90) { 
+                                    const gatherAmount = 1;
+                                    resourceMap[target.id] = (resourceMap[target.id] || 0) + gatherAmount;
+                                    hasChanges = true;
+                                    currentEntity.carryAmount = (currentEntity.carryAmount || 0) + gatherAmount;
+                                    currentEntity.carryType = target.subType as ResourceType;
+                                }
+                            }
                         }
-                        return { ...entity, position: pos };
                     }
                 }
 
                 // Returning Resources
-                if (entity.state === 'returning') {
-                     const townHall = prev.entities.find(t => t.id === entity.targetId);
+                if (currentEntity.state === 'returning') {
+                     const townHall = prev.entities.find(t => t.id === currentEntity.targetId);
                      if (!townHall) {
                          hasChanges = true;
-                         return { ...entity, state: 'idle', position: pos };
-                     }
-                     const dx = townHall.position.x - pos.x;
-                     const dz = townHall.position.z - pos.z;
-                     const dist = Math.sqrt(dx*dx + dz*dz);
-                     if (dist > 4.0) { 
-                         const speed = (stats.speed || 2.5) * TICK_SPEED;
-                         hasChanges = true;
-                         pos.x += (dx/dist) * speed;
-                         pos.z += (dz/dist) * speed;
-                         return { ...entity, position: pos };
+                         currentEntity.state = 'idle';
                      } else {
-                         const amount = entity.carryAmount || 0;
-                         if (entity.carryType === ResourceType.GOLD) {
-                             newResources.gold += amount;
-                             newStats.resourcesGathered.gold += amount;
-                         }
-                         if (entity.carryType === ResourceType.WOOD) {
-                             newResources.wood += amount;
-                             newStats.resourcesGathered.wood += amount;
-                         }
-                         if (entity.carryType === ResourceType.STONE) {
-                             newResources.stone += amount;
-                             newStats.resourcesGathered.stone += amount;
-                         }
-                         if (entity.carryType === ResourceType.IRON) {
-                             newResources.iron += amount;
-                             newStats.resourcesGathered.iron += amount;
-                         }
-                         
-                         const color = entity.carryType === ResourceType.GOLD ? '#fbbf24' : 
-                                       entity.carryType === ResourceType.IRON ? '#f97316' : 
-                                       entity.carryType === ResourceType.STONE ? '#9ca3af' : '#166534';
+                         const dx = townHall.position.x - pos.x;
+                         const dz = townHall.position.z - pos.z;
+                         const dist = Math.sqrt(dx*dx + dz*dz);
+                         if (dist > 4.0) { 
+                             const speed = (stats.speed || 2.5) * TICK_SPEED;
+                             hasChanges = true;
+                             pos.x += (dx/dist) * speed;
+                             pos.z += (dz/dist) * speed;
+                         } else {
+                             const amount = currentEntity.carryAmount || 0;
+                             if (currentEntity.carryType === ResourceType.GOLD) {
+                                 newResources.gold += amount;
+                                 newStats.resourcesGathered.gold += amount;
+                             }
+                             if (currentEntity.carryType === ResourceType.WOOD) {
+                                 newResources.wood += amount;
+                                 newStats.resourcesGathered.wood += amount;
+                             }
+                             if (currentEntity.carryType === ResourceType.STONE) {
+                                 newResources.stone += amount;
+                                 newStats.resourcesGathered.stone += amount;
+                             }
+                             if (currentEntity.carryType === ResourceType.IRON) {
+                                 newResources.iron += amount;
+                                 newStats.resourcesGathered.iron += amount;
+                             }
+                             
+                             const color = currentEntity.carryType === ResourceType.GOLD ? '#fbbf24' : 
+                                           currentEntity.carryType === ResourceType.IRON ? '#f97316' : 
+                                           currentEntity.carryType === ResourceType.STONE ? '#9ca3af' : '#166534';
 
-                         newFloatingTexts.push({ id: uuidv4(), text: `+${amount}`, position: {x: pos.x, y: 3, z: pos.z}, color, life: 1 });
-                         hasChanges = true;
-                         if (entity.lastResourceId) {
-                             return { ...entity, position: pos, state: 'gathering', targetId: entity.lastResourceId, carryAmount: 0, carryType: undefined };
+                             newFloatingTexts.push({ id: uuidv4(), text: `+${amount}`, position: {x: pos.x, y: 3, z: pos.z}, color, life: 1 });
+                             hasChanges = true;
+                             
+                             currentEntity.carryAmount = 0;
+                             currentEntity.carryType = undefined;
+                             
+                             if (currentEntity.lastResourceId) {
+                                 currentEntity.state = 'gathering';
+                                 currentEntity.targetId = currentEntity.lastResourceId;
+                             } else {
+                                 currentEntity.state = 'idle';
+                             }
                          }
-                         return { ...entity, state: 'idle', carryAmount: 0, carryType: undefined, position: pos };
                      }
                 }
                 
                 // Attacking
-                if (entity.state === 'attacking' && entity.targetId) {
-                     const target = prev.entities.find(t => t.id === entity.targetId);
+                if (currentEntity.state === 'attacking' && currentEntity.targetId) {
+                     const target = prev.entities.find(t => t.id === currentEntity.targetId);
                      
                      // Target Invalid Check
                      if (!target || target.hp <= 0 || !target.visible) {
                          hasChanges = true;
                          // Resume attack move or Patrol if applicable
-                         if (entity.attackMoveDestination) {
-                             return { 
-                                 ...entity, 
-                                 state: 'moving', 
-                                 targetPos: entity.attackMoveDestination, 
-                                 targetId: null, 
-                                 position: pos 
-                             };
+                         if (currentEntity.attackMoveDestination) {
+                             currentEntity.state = 'moving';
+                             currentEntity.targetPos = currentEntity.attackMoveDestination;
+                             currentEntity.targetId = null;
+                         } else if (currentEntity.patrolPoints && currentEntity.patrolIndex !== undefined) {
+                              currentEntity.state = 'moving';
+                              currentEntity.targetPos = currentEntity.patrolPoints[currentEntity.patrolIndex];
+                              currentEntity.targetId = null;
+                         } else {
+                              currentEntity.state = 'idle';
+                              currentEntity.targetId = null;
                          }
-                         if (entity.patrolPoints && entity.patrolIndex !== undefined) {
-                              return {
-                                  ...entity,
-                                  state: 'moving',
-                                  targetPos: entity.patrolPoints[entity.patrolIndex],
-                                  targetId: null,
-                                  position: pos
-                              };
-                         }
-                         return { ...entity, state: 'idle', position: pos };
-                     }
-                     
-                     // Hold Position Range Check
-                     const range = stats.range || 2;
-                     const dx = target.position.x - pos.x;
-                     const dz = target.position.z - pos.z;
-                     const dist = Math.sqrt(dx*dx + dz*dz);
-
-                     if (entity.holdPosition && dist > range) {
-                         hasChanges = true;
-                         // Lost target due to hold position
-                         return { ...entity, state: 'idle', targetId: null, position: pos };
-                     }
-
-                     if (dist > range) {
-                         const speed = (stats.speed || 3) * TICK_SPEED;
-                         hasChanges = true;
-                         pos.x += (dx/dist) * speed;
-                         pos.z += (dz/dist) * speed;
-                         return { ...entity, position: pos };
                      } else {
-                         if (now - entity.lastAttackTime > stats.attackSpeed) {
+                         // Hold Position Range Check
+                         const range = stats.range || 2;
+                         const dx = target.position.x - pos.x;
+                         const dz = target.position.z - pos.z;
+                         const dist = Math.sqrt(dx*dx + dz*dz);
+
+                         if (currentEntity.holdPosition && dist > range) {
                              hasChanges = true;
-                             const dmg = stats.damage || 5;
-                             if (range > 3) {
-                                 newProjectiles.push({
-                                     id: uuidv4(),
-                                     startPos: { x: pos.x, y: 1.5, z: pos.z },
-                                     targetId: target.id,
-                                     speed: 0.1,
-                                     progress: 0,
-                                     damage: dmg
-                                 });
-                             } else {
-                                 damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
-                                 if (target.visible) {
-                                    newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
+                             currentEntity.state = 'idle';
+                             currentEntity.targetId = null;
+                         } else if (dist > range) {
+                             const speed = (stats.speed || 3) * TICK_SPEED;
+                             hasChanges = true;
+                             pos.x += (dx/dist) * speed;
+                             pos.z += (dz/dist) * speed;
+                         } else {
+                             if (now - currentEntity.lastAttackTime > stats.attackSpeed) {
+                                 hasChanges = true;
+                                 const dmg = stats.damage || 5;
+                                 if (range > 3) {
+                                     newProjectiles.push({
+                                         id: uuidv4(),
+                                         startPos: { x: pos.x, y: 1.5, z: pos.z },
+                                         targetId: target.id,
+                                         speed: 0.1,
+                                         progress: 0,
+                                         damage: dmg
+                                     });
+                                 } else {
+                                     damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
+                                     if (target.visible) {
+                                        newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
+                                     }
                                  }
+                                 currentEntity.lastAttackTime = now;
                              }
-                             return { ...entity, lastAttackTime: now, position: pos };
                          }
-                         return { ...entity, position: pos };
                      }
                 }
-                return { ...entity, position: pos };
+
+                currentEntity.position = pos;
+                return currentEntity;
             });
 
             newEntities = newEntities.map(e => {
@@ -1174,6 +1183,9 @@ export default function App() {
             
             // Clean up selection
             const newSelection = prev.selection.filter(id => survivingEntities.find(e => e.id === id));
+            
+            // Only update timeToNextWave state here if needed to avoid flicker, or let the side effect above handle it.
+            // For smoother UI, we can pass it down.
             
             return hasChanges ? { 
                 ...prev, 
@@ -1267,6 +1279,7 @@ export default function App() {
       )}
       <UIOverlay 
         gameState={gameState} 
+        timeToNextWave={timeToNextWave}
         onTrainUnit={handleTrainUnit}
         onResearch={handleResearch}
         onBuild={handleBuild}
