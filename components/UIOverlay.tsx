@@ -306,7 +306,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     label="Train Peasant" 
                     cost={COSTS[UnitType.PEASANT]} 
                     onClick={() => onTrainUnit(UnitType.PEASANT)} 
-                    disabled={gameState.resources.gold < COSTS[UnitType.PEASANT].gold}
+                    disabled={gameState.resources.gold < COSTS[UnitType.PEASANT].gold || gameState.resources.food + (COSTS[UnitType.PEASANT].food || 1) > gameState.resources.maxFood}
                  />
             )}
             
@@ -318,21 +318,21 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     label="Train Footman" 
                     cost={COSTS[UnitType.FOOTMAN]} 
                     onClick={() => onTrainUnit(UnitType.FOOTMAN)} 
-                    disabled={gameState.resources.gold < COSTS[UnitType.FOOTMAN].gold || gameState.resources.wood < COSTS[UnitType.FOOTMAN].wood}
+                    disabled={gameState.resources.gold < COSTS[UnitType.FOOTMAN].gold || gameState.resources.wood < COSTS[UnitType.FOOTMAN].wood || gameState.resources.food + (COSTS[UnitType.FOOTMAN].food || 1) > gameState.resources.maxFood}
                  />
                  <ActionButton 
                     icon={<Crosshair />} 
                     label="Train Archer" 
                     cost={COSTS[UnitType.ARCHER]} 
                     onClick={() => onTrainUnit(UnitType.ARCHER)} 
-                    disabled={gameState.resources.gold < COSTS[UnitType.ARCHER].gold || gameState.resources.wood < COSTS[UnitType.ARCHER].wood}
+                    disabled={gameState.resources.gold < COSTS[UnitType.ARCHER].gold || gameState.resources.wood < COSTS[UnitType.ARCHER].wood || gameState.resources.food + (COSTS[UnitType.ARCHER].food || 1) > gameState.resources.maxFood}
                  />
                  <ActionButton 
                     icon={<Sword />} 
                     label="Train Knight" 
                     cost={COSTS[UnitType.KNIGHT]} 
                     onClick={() => onTrainUnit(UnitType.KNIGHT)} 
-                    disabled={gameState.resources.gold < COSTS[UnitType.KNIGHT].gold}
+                    disabled={gameState.resources.gold < COSTS[UnitType.KNIGHT].gold || gameState.resources.food + (COSTS[UnitType.KNIGHT].food || 1) > gameState.resources.maxFood}
                  />
                 </>
             )}

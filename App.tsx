@@ -435,6 +435,14 @@ export default function App() {
 
   const handleTrainUnit = (type: UnitType) => {
     const cost = COSTS[type];
+    
+    // Check Food Limit
+    const unitFood = cost.food || 1;
+    if (gameState.resources.food + unitFood > gameState.resources.maxFood) {
+        addMessage("Need more farms!", 'alert');
+        return;
+    }
+
     if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
        const buildingId = gameState.selection[0];
        
@@ -453,7 +461,8 @@ export default function App() {
                 ...prev.resources,
                 gold: prev.resources.gold - cost.gold,
                 wood: prev.resources.wood - cost.wood,
-                food: prev.resources.food + (cost.food || 1)
+                // Food is updated dynamically in loop, but we reserve it here conceptually? 
+                // No, better to let the loop see the queue and update it.
             };
 
             const updatedBuilding = {
@@ -637,13 +646,8 @@ export default function App() {
 
             // 1. WAVE LOGIC
             waveTimerRef.current += deltaSeconds;
-            // Update time display periodically (every 1s roughly)
             if (Math.floor(waveTimerRef.current) % 1 === 0) {
                  const remaining = Math.max(0, Math.ceil(nextWaveTimeRef.current - waveTimerRef.current));
-                 // State update inside loop is risky, better to compute derived or throttle
-                 // We will update it only if difference is significant to avoid spamming state updates
-                 // Actually, setTimeToNextWave is state, we shouldn't call it deep in a fast loop if possible
-                 // But for simplicity, we do it here, React batches.
                  setTimeToNextWave(remaining); 
             }
 
@@ -655,7 +659,6 @@ export default function App() {
                     const spawnCount = Math.floor(currentWave * 2) + 1;
                     messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
                     
-                    // Determine active spawn points based on wave progress
                     let activeSpawns = [ENEMY_SPAWN_POINTS[0]]; // Always North
                     if (currentWave > 3) activeSpawns.push(ENEMY_SPAWN_POINTS[1]); // East
                     if (currentWave > 6) activeSpawns.push(ENEMY_SPAWN_POINTS[3]); // South East
@@ -803,17 +806,15 @@ export default function App() {
 
             const resourceMap: Record<string, number> = {}; 
 
-            // Entity Logic Loop (Refactored to avoid early returns skipping movement)
+            // Entity Logic Loop
             newEntities = newEntities.map(entity => {
                 const CARRY_CAPACITY = 10;
                 const TICK_SPEED = 0.033;
                 
-                // Create a mutable copy for this logic pass
                 let currentEntity = { ...entity };
                 let pos = { ...currentEntity.position };
                 const stats = getStats(currentEntity.subType as UnitType);
 
-                // Update MaxHP dynamically if upgrade just finished
                 if (currentEntity.faction === Faction.PLAYER && currentEntity.type === EntityType.UNIT) {
                     if (currentEntity.maxHp < stats.hp) {
                          hasChanges = true;
@@ -821,7 +822,6 @@ export default function App() {
                     }
                 }
 
-                // Unit Separation (Updates pos)
                 if (currentEntity.type === EntityType.UNIT && (currentEntity.state === 'moving' || currentEntity.state === 'attacking' || currentEntity.state === 'gathering' || currentEntity.state === 'returning')) {
                     const separationRadius = 1.0;
                     let moveX = 0, moveZ = 0;
@@ -847,16 +847,13 @@ export default function App() {
                     }
                 }
 
-                // --- AUTO RETALIATION & ATTACK MOVE SCANNING ---
                 if (currentEntity.type === EntityType.UNIT && currentEntity.faction === Faction.PLAYER) {
                     const isAttackMove = currentEntity.state === 'moving' && (currentEntity.attackMoveDestination || currentEntity.patrolPoints);
                     const isIdle = currentEntity.state === 'idle';
 
                     if ((isIdle || isAttackMove) && !currentEntity.holdPosition) {
-                        // Scan for enemies
                         let closestEnemy = null;
                         let minDst = AGGRO_RANGE;
-                        
                         for(const other of prev.entities) {
                             if (other.faction === Faction.ENEMY && other.hp > 0 && other.visible) {
                                 const d = Math.sqrt(Math.pow(currentEntity.position.x - other.position.x, 2) + Math.pow(currentEntity.position.z - other.position.z, 2));
@@ -866,12 +863,10 @@ export default function App() {
                                 }
                             }
                         }
-
                         if (closestEnemy) {
                             hasChanges = true;
                             currentEntity.state = 'attacking';
                             currentEntity.targetId = closestEnemy.id;
-                            // Keep move dest if any
                         }
                     } else if (currentEntity.holdPosition && isIdle) {
                         const range = stats.range || 2;
@@ -888,7 +883,6 @@ export default function App() {
                     }
                 }
                 
-                // --- ENEMY AI ---
                 if (currentEntity.faction === Faction.ENEMY && currentEntity.type === EntityType.UNIT) {
                     if (currentEntity.state === 'idle' || (currentEntity.state === 'moving' && !currentEntity.targetId)) {
                         let closest = null;
@@ -917,12 +911,11 @@ export default function App() {
                         } else if (!currentEntity.targetPos) {
                              hasChanges = true;
                              currentEntity.state = 'moving';
-                             currentEntity.targetPos = {x:-60,y:0,z:-60}; // Move towards player base
+                             currentEntity.targetPos = {x:-60,y:0,z:-60}; 
                         }
                     }
                 }
                 
-                // Building Attack (Towers)
                 if (currentEntity.subType === BuildingType.TOWER && currentEntity.faction === Faction.PLAYER) {
                     if (now - currentEntity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
@@ -946,9 +939,6 @@ export default function App() {
                     }
                 }
 
-                // --- MOVEMENT LOGIC ---
-                // Only process movement if state is moving and targetPos is set
-                // Note: We use currentEntity.state which might have been updated by AI above
                 if (currentEntity.state === 'moving' && currentEntity.targetPos) {
                     const dx = currentEntity.targetPos.x - pos.x;
                     const dz = currentEntity.targetPos.z - pos.z;
@@ -958,13 +948,11 @@ export default function App() {
                     if (dist < 0.5) {
                         hasChanges = true;
                         
-                        // Patrol Logic
                         if (currentEntity.patrolPoints && currentEntity.patrolIndex !== undefined) {
                             const nextIndex = (currentEntity.patrolIndex + 1) % 2;
                             currentEntity.patrolIndex = nextIndex;
                             currentEntity.targetPos = currentEntity.patrolPoints[nextIndex];
                         } else {
-                            // Reached destination
                             currentEntity.state = 'idle';
                             currentEntity.targetPos = null;
                             currentEntity.attackMoveDestination = null;
@@ -976,7 +964,6 @@ export default function App() {
                     }
                 }
 
-                // Gathering
                 if (currentEntity.state === 'gathering') {
                     if ((currentEntity.carryAmount || 0) >= CARRY_CAPACITY) {
                         const townHall = prev.entities.find(e => e.faction === Faction.PLAYER && e.subType === BuildingType.TOWN_HALL);
@@ -1025,7 +1012,6 @@ export default function App() {
                     }
                 }
 
-                // Returning Resources
                 if (currentEntity.state === 'returning') {
                      const townHall = prev.entities.find(t => t.id === currentEntity.targetId);
                      if (!townHall) {
@@ -1079,14 +1065,11 @@ export default function App() {
                      }
                 }
                 
-                // Attacking
                 if (currentEntity.state === 'attacking' && currentEntity.targetId) {
                      const target = prev.entities.find(t => t.id === currentEntity.targetId);
                      
-                     // Target Invalid Check
                      if (!target || target.hp <= 0 || !target.visible) {
                          hasChanges = true;
-                         // Resume attack move or Patrol if applicable
                          if (currentEntity.attackMoveDestination) {
                              currentEntity.state = 'moving';
                              currentEntity.targetPos = currentEntity.attackMoveDestination;
@@ -1100,7 +1083,6 @@ export default function App() {
                               currentEntity.targetId = null;
                          }
                      } else {
-                         // Hold Position Range Check
                          const range = stats.range || 2;
                          const dx = target.position.x - pos.x;
                          const dz = target.position.z - pos.z;
@@ -1149,7 +1131,6 @@ export default function App() {
                 if (damageMap[e.id]) newHp -= damageMap[e.id];
                 if (resourceMap[e.id]) newHp -= resourceMap[e.id]; 
                 
-                // Track Stats
                 if (newHp <= 0 && e.hp > 0) {
                      if (e.faction === Faction.PLAYER && e.type === EntityType.UNIT) newStats.unitsLost++;
                      if (e.faction === Faction.ENEMY && e.type === EntityType.UNIT) newStats.enemiesKilled++;
@@ -1160,13 +1141,36 @@ export default function App() {
 
             const survivingEntities = newEntities.filter(e => e.hp > 0);
             
-            // Check Victory (End of Final Wave)
+            // Calculate Food Dynamically
+            let currentFood = 0;
+            let currentMaxFood = 10; // Base Capacity
+            survivingEntities.forEach(e => {
+                if (e.faction === Faction.PLAYER) {
+                    if (e.subType === BuildingType.TOWN_HALL) currentMaxFood += 10;
+                    if (e.subType === BuildingType.FARM) currentMaxFood += 8;
+
+                    if (e.type === EntityType.UNIT) {
+                         const c = COSTS[e.subType as UnitType];
+                         if (c) currentFood += (c.food || 1);
+                    }
+                    if (e.type === EntityType.BUILDING && e.productionQueue) {
+                         e.productionQueue.forEach(q => {
+                             if (q.type === 'UNIT') {
+                                  const c = COSTS[q.name as UnitType];
+                                  if (c) currentFood += (c.food || 1);
+                             }
+                         });
+                    }
+                }
+            });
+            newResources.food = currentFood;
+            newResources.maxFood = currentMaxFood;
+
             if (currentWave === MAX_WAVES && survivingEntities.filter(e => e.faction === Faction.ENEMY).length === 0) {
                  gameOver = true;
                  gameWon = true;
             }
 
-            // Check Defeat
             const townHall = survivingEntities.find(e => e.subType === BuildingType.TOWN_HALL && e.faction === Faction.PLAYER);
             if (!townHall && !prev.gameOver) {
                 messages.push({ id: uuidv4(), text: 'The Kingdom has fallen! Game Over.', type: 'alert', timestamp: Date.now() });
@@ -1181,11 +1185,7 @@ export default function App() {
             newFloatingTexts = newFloatingTexts.map(ft => ({ ...ft, life: ft.life - 0.02 })).filter(ft => ft.life > 0);
             if (newFloatingTexts.length !== prev.floatingTexts.length) hasChanges = true;
             
-            // Clean up selection
             const newSelection = prev.selection.filter(id => survivingEntities.find(e => e.id === id));
-            
-            // Only update timeToNextWave state here if needed to avoid flicker, or let the side effect above handle it.
-            // For smoother UI, we can pass it down.
             
             return hasChanges ? { 
                 ...prev, 
@@ -1248,7 +1248,6 @@ export default function App() {
                     : "The Realm of Aethelgard has fallen."}
               </p>
               
-              {/* Stats Table */}
               <div className="grid grid-cols-2 gap-x-12 gap-y-4 text-gray-300 font-ui mb-8 text-sm">
                    <div className="text-right text-gray-500">Time Survived:</div>
                    <div className="text-left font-bold text-white">{Math.floor(gameState.stats.timeElapsed)}s</div>
