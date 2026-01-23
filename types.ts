@@ -88,12 +88,19 @@ export interface Entity {
   // Combat
   lastAttackTime: number;
   name: string;
+  
+  // AI & Aggro
+  aggroTargetId?: string | null;
+  targetPriority?: 'units' | 'buildings';
+  lastDamagedBy?: string | null;
+  lastDamagedAt?: number;
 }
 
 export interface Projectile {
   id: string;
   startPos: Position;
   targetId: string; // Homing arrows for MVP
+  sourceId: string; // ID of the entity that fired this
   speed: number;
   progress: number; // 0 to 1
   damage: number;

@@ -57,7 +57,17 @@ export const COLORS = {
 export const INITIAL_CAMERA_POS = [-40, 45, -40] as const; 
 
 export const AGGRO_RANGE = 12;
+export const ENEMY_AGGRO_RANGE = 12; // Radius to auto-acquire targets
+export const RETALIATION_WINDOW = 3000; // ms to prioritize attacker
 export const QUEUE_SIZE = 5;
+
+export const BUILDING_PRIORITY = [
+  BuildingType.TOWN_HALL,
+  BuildingType.BARRACKS,
+  BuildingType.TOWER,
+  BuildingType.BLACKSMITH,
+  BuildingType.FARM
+];
 
 export const ENEMY_SPAWN_POINTS = [
   { x: 0, y: 0, z: 95 },   // North

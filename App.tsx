@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { GameScene } from './components/GameScene';
 import { UIOverlay } from './components/UIOverlay';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, ResourceType, UpgradeType } from './types';
-import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, QUEUE_SIZE, MAX_WAVES, MAP_SIZE, ENEMY_SPAWN_POINTS } from './constants';
+import { COSTS, INITIAL_CAMERA_POS, UNIT_STATS, AGGRO_RANGE, ENEMY_AGGRO_RANGE, RETALIATION_WINDOW, BUILDING_PRIORITY, QUEUE_SIZE, MAX_WAVES, MAP_SIZE, ENEMY_SPAWN_POINTS } from './constants';
 import { generateLore, generateAdvisorTip } from './services/geminiService';
 
 // --- Map Generation Helper ---
@@ -67,6 +67,62 @@ const buildInitialMap = (): Entity[] => {
 
     return entities;
 };
+
+// --- AI Targeting Helper ---
+const findEnemyTarget = (enemy: Entity, allEntities: Entity[], now: number): Entity | null => {
+    const playerEntities = allEntities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
+    if (playerEntities.length === 0) return null;
+
+    // 1. Retaliation
+    if (enemy.lastDamagedBy && enemy.lastDamagedAt && (now - enemy.lastDamagedAt < RETALIATION_WINDOW)) {
+        const attacker = playerEntities.find(e => e.id === enemy.lastDamagedBy);
+        if (attacker) return attacker;
+    }
+
+    // 2. Aggro Range (Nearby Units)
+    const nearbyUnits = playerEntities.filter(e => e.type === EntityType.UNIT);
+    let closestUnit = null;
+    let closestUnitDist = Infinity;
+    
+    for (const unit of nearbyUnits) {
+        const d = Math.sqrt(Math.pow(enemy.position.x - unit.position.x, 2) + Math.pow(enemy.position.z - unit.position.z, 2));
+        if (d < ENEMY_AGGRO_RANGE && d < closestUnitDist) {
+            closestUnitDist = d;
+            closestUnit = unit;
+        }
+    }
+    if (closestUnit) return closestUnit;
+
+    // 3. Buildings Priority
+    const buildings = playerEntities.filter(e => e.type === EntityType.BUILDING);
+    if (buildings.length > 0) {
+        for (const type of BUILDING_PRIORITY) {
+             const typeBuildings = buildings.filter(b => b.subType === type);
+             if (typeBuildings.length > 0) {
+                 // Find closest of this priority type
+                 let closest = null;
+                 let minD = Infinity;
+                 for (const b of typeBuildings) {
+                     const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
+                     if (d < minD) { minD = d; closest = b; }
+                 }
+                 if (closest) return closest;
+             }
+        }
+        // Fallback to any building
+        return buildings[0];
+    }
+
+    // 4. Any nearest entity (Global search)
+    let globalClosest = null;
+    let globalMinD = Infinity;
+    for (const p of playerEntities) {
+        const d = Math.sqrt(Math.pow(enemy.position.x - p.position.x, 2) + Math.pow(enemy.position.z - p.position.z, 2));
+        if (d < globalMinD) { globalMinD = d; globalClosest = p; }
+    }
+    return globalClosest;
+};
+
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>({
@@ -461,8 +517,7 @@ export default function App() {
                 ...prev.resources,
                 gold: prev.resources.gold - cost.gold,
                 wood: prev.resources.wood - cost.wood,
-                // Food is updated dynamically in loop, but we reserve it here conceptually? 
-                // No, better to let the loop see the queue and update it.
+                // Food is updated dynamically in loop
             };
 
             const updatedBuilding = {
@@ -656,36 +711,54 @@ export default function App() {
                     waveTimerRef.current = 0;
                     currentWave++;
                     nextWaveTimeRef.current = 90; // Subsequent waves every 90s
-                    const spawnCount = Math.floor(currentWave * 2) + 1;
-                    messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
                     
+                    // Wave Logic: Calculate count and active spawn points
+                    const baseCount = (currentWave * 2) + 2;
                     let activeSpawns = [ENEMY_SPAWN_POINTS[0]]; // Always North
                     if (currentWave > 3) activeSpawns.push(ENEMY_SPAWN_POINTS[1]); // East
                     if (currentWave > 6) activeSpawns.push(ENEMY_SPAWN_POINTS[3]); // South East
                     if (currentWave === MAX_WAVES) activeSpawns = ENEMY_SPAWN_POINTS; // All sides
+                    
+                    const spawnCount = Math.floor(baseCount * activeSpawns.length * 0.6); // Slightly adjusted formula
+
+                    messages.push({ id: uuidv4(), text: `Wave ${currentWave} approaching!`, type: 'alert', timestamp: Date.now() });
 
                     for(let i=0; i<spawnCount; i++) {
                         const spawnPoint = activeSpawns[Math.floor(Math.random() * activeSpawns.length)];
-                        // Add slight jitter
                         const spawnPos = { 
                             x: spawnPoint.x + (Math.random() - 0.5) * 10, 
                             y: 0, 
                             z: spawnPoint.z + (Math.random() - 0.5) * 10 
                         };
                         
-                        newEntities.push({
+                        // Create enemy
+                        const newEnemy: Entity = {
                             id: uuidv4(),
                             type: EntityType.UNIT,
                             subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, 
                             faction: Faction.ENEMY,
                             position: spawnPos,
-                            hp: 420,
+                            hp: 420, // Default HP, could scale
                             maxHp: 420,
-                            state: 'idle',
+                            state: 'idle', // Will be updated to attacking immediately below or in next loop
                             name: 'Invader',
                             lastAttackTime: 0,
-                            visible: false
-                        });
+                            visible: false,
+                            targetPriority: 'units' // Default priority
+                        };
+                        
+                        // Immediate Target Acquisition for Spawns
+                        const initialTarget = findEnemyTarget(newEnemy, newEntities, now);
+                        if (initialTarget) {
+                            newEnemy.state = 'attacking';
+                            newEnemy.targetId = initialTarget.id;
+                        } else {
+                            // Fallback move to base center if no targets found (e.g. all dead)
+                            newEnemy.state = 'moving';
+                            newEnemy.targetPos = { x: -60, y: 0, z: -60 };
+                        }
+
+                        newEntities.push(newEnemy);
                     }
                     hasChanges = true;
                 }
@@ -798,6 +871,19 @@ export default function App() {
             const damageMap: Record<string, number> = {};
             hitProjectiles.forEach(p => {
                 damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
+                
+                // Track Damage Source for AI Retaliation
+                const target = newEntities.find(e => e.id === p.targetId);
+                if (target && target.faction === Faction.ENEMY) {
+                     // We need to find who shot this projectile.
+                     const source = prev.entities.find(e => e.id === p.sourceId);
+                     if (source && source.faction === Faction.PLAYER) {
+                         target.lastDamagedBy = source.id;
+                         target.lastDamagedAt = now;
+                         hasChanges = true;
+                     }
+                }
+
                 const t = prev.entities.find(e => e.id === p.targetId);
                 if (t && t.visible) {
                     newFloatingTexts.push({ id: uuidv4(), text: `-${p.damage}`, position: { ...t.position }, color: '#ef4444', life: 1 });
@@ -883,35 +969,32 @@ export default function App() {
                     }
                 }
                 
+                // --- ENEMY AI REWRITE ---
                 if (currentEntity.faction === Faction.ENEMY && currentEntity.type === EntityType.UNIT) {
-                    if (currentEntity.state === 'idle' || (currentEntity.state === 'moving' && !currentEntity.targetId)) {
-                        let closest = null;
-                        let minDst = Infinity;
-                        for (const other of prev.entities) {
-                            if (other.faction === Faction.PLAYER && other.hp > 0) {
-                                const d = Math.sqrt(Math.pow(currentEntity.position.x - other.position.x, 2) + Math.pow(currentEntity.position.z - other.position.z, 2));
-                                if (d < minDst) {
-                                    minDst = d;
-                                    closest = other;
-                                }
-                            }
-                        }
-                        
-                        if (closest) {
-                            if (minDst < AGGRO_RANGE) {
-                                 hasChanges = true;
-                                 currentEntity.state = 'attacking';
-                                 currentEntity.targetId = closest.id;
-                                 currentEntity.targetPos = null;
-                            } else {
-                                 hasChanges = true;
-                                 currentEntity.state = 'moving';
-                                 currentEntity.targetPos = closest.position;
-                            }
+                    // Check if current target is invalid
+                    let needsNewTarget = false;
+                    
+                    if (currentEntity.targetId) {
+                         const currentTarget = prev.entities.find(e => e.id === currentEntity.targetId);
+                         if (!currentTarget || currentTarget.hp <= 0) {
+                             needsNewTarget = true;
+                         }
+                    } else if (currentEntity.state === 'idle' || (currentEntity.state === 'moving' && !currentEntity.targetId)) {
+                        needsNewTarget = true;
+                    }
+
+                    if (needsNewTarget) {
+                        const newTarget = findEnemyTarget(currentEntity, prev.entities, now);
+                        if (newTarget) {
+                             hasChanges = true;
+                             currentEntity.state = 'attacking';
+                             currentEntity.targetId = newTarget.id;
+                             currentEntity.targetPos = null;
                         } else if (!currentEntity.targetPos) {
+                             // No targets at all? Move to center of player base area just in case
                              hasChanges = true;
                              currentEntity.state = 'moving';
-                             currentEntity.targetPos = {x:-60,y:0,z:-60}; 
+                             currentEntity.targetPos = { x: -60, y: 0, z: -60 };
                         }
                     }
                 }
@@ -929,6 +1012,7 @@ export default function App() {
                                  id: uuidv4(),
                                  startPos: { x: currentEntity.position.x, y: 4, z: currentEntity.position.z },
                                  targetId: target.id,
+                                 sourceId: currentEntity.id, // Source ID
                                  speed: 0.1,
                                  progress: 0,
                                  damage: stats.damage
@@ -1079,6 +1163,8 @@ export default function App() {
                               currentEntity.targetPos = currentEntity.patrolPoints[currentEntity.patrolIndex];
                               currentEntity.targetId = null;
                          } else {
+                              // If enemy AI lost target, it needs to re-acquire.
+                              // Setting idle will trigger re-acquisition in next loop
                               currentEntity.state = 'idle';
                               currentEntity.targetId = null;
                          }
@@ -1106,12 +1192,17 @@ export default function App() {
                                          id: uuidv4(),
                                          startPos: { x: pos.x, y: 1.5, z: pos.z },
                                          targetId: target.id,
+                                         sourceId: currentEntity.id, // Source ID
                                          speed: 0.1,
                                          progress: 0,
                                          damage: dmg
                                      });
                                  } else {
                                      damageMap[target.id] = (damageMap[target.id] || 0) + dmg;
+                                     if (target.faction === Faction.ENEMY && currentEntity.faction === Faction.PLAYER) {
+                                         target.lastDamagedBy = currentEntity.id;
+                                         target.lastDamagedAt = now;
+                                     }
                                      if (target.visible) {
                                         newFloatingTexts.push({ id: uuidv4(), text: `-${dmg}`, position: { ...target.position }, color: '#ef4444', life: 1 });
                                      }
