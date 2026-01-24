@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { v4 as uuidv4 } from 'uuid';
@@ -150,10 +148,10 @@ export default function App() {
 
   const [selectionBox, setSelectionBox] = useState<{start: {x:number, y:number}, current: {x:number, y:number}} | null>(null);
   const [cameraTarget, setCameraTarget] = useState<THREE.Vector3 | null>(new THREE.Vector3(-60, 0, -60));
-  const [timeToNextWave, setTimeToNextWave] = useState(120);
+  const [timeToNextWave, setTimeToNextWave] = useState(300);
 
   const waveTimerRef = useRef(0);
-  const nextWaveTimeRef = useRef(120); // 2 minutes for first wave
+  const nextWaveTimeRef = useRef(300); // 5 minutes for first wave
   const lastKeyTimeRef = useRef<{key: string, time: number}>({ key: '', time: 0 });
 
   const addMessage = useCallback((text: string, type: 'info' | 'alert' | 'lore' = 'info') => {
@@ -710,7 +708,7 @@ export default function App() {
                 if (currentWave < MAX_WAVES) {
                     waveTimerRef.current = 0;
                     currentWave++;
-                    nextWaveTimeRef.current = 90; // Subsequent waves every 90s
+                    nextWaveTimeRef.current = 120; // Subsequent waves every 120s
                     
                     // Wave Logic: Calculate count and active spawn points
                     const baseCount = (currentWave * 2) + 2;
@@ -1282,7 +1280,7 @@ export default function App() {
                 ...prev, 
                 entities: survivingEntities, 
                 resources: newResources, 
-                projectiles: newProjectiles,
+                projectiles: newProjectiles, 
                 floatingTexts: newFloatingTexts,
                 wave: currentWave,
                 gameOver,
