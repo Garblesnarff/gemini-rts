@@ -23,6 +23,18 @@ interface GameSceneProps {
   onAttackMove: (pos: THREE.Vector3) => void;
 }
 
+const getCameraDirections = (camera: THREE.Camera) => {
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  forward.y = 0;
+  forward.normalize();
+  
+  const right = new THREE.Vector3();
+  right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  
+  return { forward, right };
+};
+
 const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> = ({ type, position }) => {
   const isTownHall = type === BuildingType.TOWN_HALL;
   const isTower = type === BuildingType.TOWER;
@@ -282,14 +294,21 @@ export const GameScene: React.FC<GameSceneProps> = ({
                 const height = camera.position.y;
                 const sensitivity = 0.05 * (height / 25); 
                 
-                // Move camera opposite to drag direction (Pulling the world)
-                const moveX = dx * sensitivity;
-                const moveZ = dy * sensitivity;
+                const { forward, right } = getCameraDirections(camera);
 
-                camera.position.x = panStartCamPos.current.x - moveX;
-                camera.position.z = panStartCamPos.current.z - moveZ;
-                controlsRef.current.target.x = panStartTarget.current.x - moveX;
-                controlsRef.current.target.z = panStartTarget.current.z - moveZ;
+                // Calculate movement in camera-relative directions
+                // dx (horizontal screen drag) → move along camera's right vector
+                // dy (vertical screen drag) → move along camera's forward vector
+                // Pulling the world:
+                // Drag Right (dx > 0) -> Camera Left (-Right)
+                // Drag Down (dy > 0) -> Camera Forward (+Forward)
+                
+                const moveVector = new THREE.Vector3();
+                moveVector.addScaledVector(right, -dx * sensitivity);
+                moveVector.addScaledVector(forward, dy * sensitivity);
+
+                camera.position.copy(panStartCamPos.current).add(moveVector);
+                controlsRef.current.target.copy(panStartTarget.current).add(moveVector);
                 controlsRef.current.update();
             }
         }
@@ -404,33 +423,40 @@ export const GameScene: React.FC<GameSceneProps> = ({
   useFrame((state, delta) => {
     const PAN_SPEED = 40 * delta;
     
-    let moveX = 0;
-    let moveZ = 0;
+    // Get input
+    let inputForward = 0;
+    let inputRight = 0;
 
-    // Keyboard Input
-    if (keysPressed.current['KeyW'] || keysPressed.current['ArrowUp']) moveZ -= 1;
-    if (keysPressed.current['KeyS'] || keysPressed.current['ArrowDown']) moveZ += 1;
-    if (keysPressed.current['KeyA'] || keysPressed.current['ArrowLeft']) moveX -= 1;
-    if (keysPressed.current['KeyD'] || keysPressed.current['ArrowRight']) moveX += 1;
+    if (keysPressed.current['KeyW'] || keysPressed.current['ArrowUp']) inputForward += 1;
+    if (keysPressed.current['KeyS'] || keysPressed.current['ArrowDown']) inputForward -= 1;
+    if (keysPressed.current['KeyA'] || keysPressed.current['ArrowLeft']) inputRight -= 1;
+    if (keysPressed.current['KeyD'] || keysPressed.current['ArrowRight']) inputRight += 1;
 
-    if (moveX !== 0 || moveZ !== 0) {
-        const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-        if (len > 0) {
-            moveX = moveX / len;
-            moveZ = moveZ / len;
-        }
-
+    if (inputForward !== 0 || inputRight !== 0) {
         const controls = controlsRef.current;
         if (controls) {
+            const { forward, right } = getCameraDirections(camera);
+
+            // Normalize diagonal movement
+            const len = Math.sqrt(inputForward * inputForward + inputRight * inputRight);
+            if (len > 0) {
+                inputForward /= len;
+                inputRight /= len;
+            }
+
+            // Calculate world-space movement
+            const moveVector = new THREE.Vector3();
+            moveVector.addScaledVector(forward, inputForward * PAN_SPEED);
+            moveVector.addScaledVector(right, inputRight * PAN_SPEED);
+
             const target = controls.target;
-            
-            const targetX = target.x + moveX * PAN_SPEED;
-            const targetZ = target.z + moveZ * PAN_SPEED;
+            const newTargetX = target.x + moveVector.x;
+            const newTargetZ = target.z + moveVector.z;
             
             // Bounds updated for 200x200 map
             const BOUNDS = 90;
-            const clampedTargetX = Math.max(-BOUNDS, Math.min(BOUNDS, targetX));
-            const clampedTargetZ = Math.max(-BOUNDS, Math.min(BOUNDS, targetZ));
+            const clampedTargetX = Math.max(-BOUNDS, Math.min(BOUNDS, newTargetX));
+            const clampedTargetZ = Math.max(-BOUNDS, Math.min(BOUNDS, newTargetZ));
             
             const deltaX = clampedTargetX - target.x;
             const deltaZ = clampedTargetZ - target.z;
