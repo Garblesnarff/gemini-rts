@@ -50,6 +50,7 @@ const Portrait = ({ type }: { type: string }) => {
     [BuildingType.BARRACKS]: 'bg-red-800',
     [BuildingType.FARM]: 'bg-green-700',
     [BuildingType.TOWER]: 'bg-stone-500',
+    [BuildingType.CANNON_TOWER]: 'bg-stone-900',
     [BuildingType.BLACKSMITH]: 'bg-stone-700',
   };
 
@@ -256,7 +257,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
               {/* Stats */}
               <div className="w-full grid grid-cols-2 gap-2 text-xs text-gray-400 mt-auto">
-                   {selectedEntity.type === EntityType.UNIT || selectedEntity.subType === BuildingType.TOWER ? (
+                   {selectedEntity.type === EntityType.UNIT || selectedEntity.subType === BuildingType.TOWER || selectedEntity.subType === BuildingType.CANNON_TOWER ? (
                        <div className="flex items-center"><Sword size={12} className="mr-1"/> {UNIT_STATS[selectedEntity.subType as UnitType]?.damage || 0} Dmg</div>
                    ) : null}
                   <div className="flex items-center"><ShieldAlert size={12} className="mr-1"/> {Math.floor(selectedEntity.maxHp/100)} Armor</div>
@@ -404,6 +405,13 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     disabled={gameState.resources.gold < COSTS[BuildingType.TOWER].gold || gameState.resources.wood < COSTS[BuildingType.TOWER].wood}
                  />
                  <ActionButton 
+                    icon={<TowerControl />} 
+                    label="Cannon Tower" 
+                    cost={COSTS[BuildingType.CANNON_TOWER]} 
+                    onClick={() => onBuild(BuildingType.CANNON_TOWER)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.CANNON_TOWER].gold || gameState.resources.stone < (COSTS[BuildingType.CANNON_TOWER].stone || 0)}
+                 />
+                 <ActionButton 
                     icon={<Anvil />} 
                     label="Blacksmith" 
                     cost={COSTS[BuildingType.BLACKSMITH]} 
@@ -436,7 +444,8 @@ const ActionButton = ({ icon, label, cost, onClick, disabled }: any) => (
             <div className="font-bold mb-1">{label}</div>
             <div className="text-gold-400">Gold: {cost.gold}</div>
             {cost.wood > 0 && <div className="text-green-400">Wood: {cost.wood}</div>}
-            <div className="text-gray-400">Food: {cost.food || 0}</div>
+            {cost.stone > 0 && <div className="text-gray-400">Stone: {cost.stone}</div>}
+            {cost.food !== undefined && <div className="text-red-400">Food: {cost.food}</div>}
         </div>
     </button>
 );

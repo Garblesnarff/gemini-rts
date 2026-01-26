@@ -445,7 +445,12 @@ export default function App() {
           return;
       }
 
-      if (gameState.resources.gold >= cost.gold && gameState.resources.wood >= cost.wood) {
+      const canAfford = 
+        gameState.resources.gold >= cost.gold && 
+        gameState.resources.wood >= cost.wood && 
+        gameState.resources.stone >= (cost.stone || 0);
+
+      if (canAfford) {
           const peasantId = gameState.selection.find(id => {
               const ent = gameState.entities.find(e => e.id === id);
               return ent && ent.subType === UnitType.PEASANT;
@@ -472,7 +477,8 @@ export default function App() {
                   resources: {
                       ...prev.resources,
                       gold: prev.resources.gold - cost.gold,
-                      wood: prev.resources.wood - cost.wood
+                      wood: prev.resources.wood - cost.wood,
+                      stone: prev.resources.stone - (cost.stone || 0)
                   },
                   entities: [...prev.entities, newBuilding],
                   placementMode: { active: false, type: null, cost: {gold:0, wood:0} }
@@ -856,7 +862,7 @@ export default function App() {
             newProjectiles = newProjectiles.map(p => {
                 const target = prev.entities.find(e => e.id === p.targetId);
                 if (!target) return { ...p, progress: 2 }; 
-                const speed = 0.05; 
+                const speed = p.speed || 0.05; 
                 const nextProgress = p.progress + speed;
                 return { ...p, progress: nextProgress };
             });
@@ -868,23 +874,67 @@ export default function App() {
             // Damage Calc
             const damageMap: Record<string, number> = {};
             hitProjectiles.forEach(p => {
-                damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
                 
-                // Track Damage Source for AI Retaliation
-                const target = newEntities.find(e => e.id === p.targetId);
-                if (target && target.faction === Faction.ENEMY) {
-                     // We need to find who shot this projectile.
-                     const source = prev.entities.find(e => e.id === p.sourceId);
-                     if (source && source.faction === Faction.PLAYER) {
-                         target.lastDamagedBy = source.id;
-                         target.lastDamagedAt = now;
-                         hasChanges = true;
-                     }
-                }
+                if (p.splash && p.splashRadius) {
+                    // Splash Damage: Find entities near the primary target
+                    const targetEntity = prev.entities.find(e => e.id === p.targetId);
+                    // We use the target's current position as the impact center. 
+                    // If target is gone, we technically miss the splash, but for simplicity we skip.
+                    if (targetEntity) {
+                        const splashCenter = targetEntity.position;
+                        newEntities.forEach(e => {
+                            if (e.faction === Faction.ENEMY && e.hp > 0) {
+                                const dx = e.position.x - splashCenter.x;
+                                const dz = e.position.z - splashCenter.z;
+                                const dist = Math.sqrt(dx*dx + dz*dz);
+                                
+                                if (dist <= p.splashRadius!) {
+                                    const falloff = 1 - (dist / p.splashRadius!) * 0.5;
+                                    const splashDmg = Math.floor(p.damage * falloff);
+                                    damageMap[e.id] = (damageMap[e.id] || 0) + splashDmg;
+                                    
+                                    if (e.visible) {
+                                        newFloatingTexts.push({ 
+                                            id: uuidv4(), 
+                                            text: `-${splashDmg}`, 
+                                            position: { ...e.position }, 
+                                            color: '#f97316', 
+                                            life: 1 
+                                        });
+                                    }
+                                }
+                            }
+                        });
+                        
+                        // Retaliation for primary target
+                         if (targetEntity.faction === Faction.ENEMY) {
+                             const source = prev.entities.find(s => s.id === p.sourceId);
+                             if (source && source.faction === Faction.PLAYER) {
+                                 targetEntity.lastDamagedBy = source.id;
+                                 targetEntity.lastDamagedAt = now;
+                                 hasChanges = true;
+                             }
+                         }
+                    }
 
-                const t = prev.entities.find(e => e.id === p.targetId);
-                if (t && t.visible) {
-                    newFloatingTexts.push({ id: uuidv4(), text: `-${p.damage}`, position: { ...t.position }, color: '#ef4444', life: 1 });
+                } else {
+                    // Single Target Damage
+                    damageMap[p.targetId] = (damageMap[p.targetId] || 0) + p.damage;
+                    
+                    const target = newEntities.find(e => e.id === p.targetId);
+                    if (target && target.faction === Faction.ENEMY) {
+                         const source = prev.entities.find(e => e.id === p.sourceId);
+                         if (source && source.faction === Faction.PLAYER) {
+                             target.lastDamagedBy = source.id;
+                             target.lastDamagedAt = now;
+                             hasChanges = true;
+                         }
+                    }
+
+                    const t = prev.entities.find(e => e.id === p.targetId);
+                    if (t && t.visible) {
+                        newFloatingTexts.push({ id: uuidv4(), text: `-${p.damage}`, position: { ...t.position }, color: '#ef4444', life: 1 });
+                    }
                 }
             });
 
@@ -997,7 +1047,7 @@ export default function App() {
                     }
                 }
                 
-                if (currentEntity.subType === BuildingType.TOWER && currentEntity.faction === Faction.PLAYER) {
+                if ((currentEntity.subType === BuildingType.TOWER || currentEntity.subType === BuildingType.CANNON_TOWER) && currentEntity.faction === Faction.PLAYER) {
                     if (now - currentEntity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
                          const target = prev.entities.find(e => {
@@ -1006,14 +1056,17 @@ export default function App() {
                              return d <= range;
                          });
                          if (target) {
+                             const isCannon = currentEntity.subType === BuildingType.CANNON_TOWER;
                              newProjectiles.push({
                                  id: uuidv4(),
                                  startPos: { x: currentEntity.position.x, y: 4, z: currentEntity.position.z },
                                  targetId: target.id,
                                  sourceId: currentEntity.id, // Source ID
-                                 speed: 0.1,
+                                 speed: isCannon ? 0.06 : 0.1,
                                  progress: 0,
-                                 damage: stats.damage
+                                 damage: stats.damage,
+                                 splash: isCannon,
+                                 splashRadius: isCannon ? (stats as any).splashRadius : undefined
                              });
                              hasChanges = true;
                              currentEntity.lastAttackTime = now;

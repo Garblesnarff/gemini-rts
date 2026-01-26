@@ -18,6 +18,7 @@ export enum BuildingType {
   BARRACKS = 'Barracks',
   FARM = 'Farm',
   TOWER = 'Scout Tower',
+  CANNON_TOWER = 'Cannon Tower',
   BLACKSMITH = 'Blacksmith'
 }
 
@@ -104,6 +105,8 @@ export interface Projectile {
   speed: number;
   progress: number; // 0 to 1
   damage: number;
+  splash?: boolean;
+  splashRadius?: number;
 }
 
 export interface FloatingText {
@@ -117,7 +120,7 @@ export interface FloatingText {
 export interface PlacementMode {
   active: boolean;
   type: BuildingType | null;
-  cost: { gold: number; wood: number };
+  cost: { gold: number; wood: number; stone?: number };
 }
 
 export interface CommandMode {

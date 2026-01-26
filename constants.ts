@@ -15,6 +15,7 @@ export const COSTS = {
   [BuildingType.BARRACKS]: { gold: 200, wood: 100, time: 5000 },
   [BuildingType.FARM]:     { gold: 80, wood: 40, time: 3000 },
   [BuildingType.TOWER]:    { gold: 150, wood: 120, time: 4000 },
+  [BuildingType.CANNON_TOWER]: { gold: 200, wood: 0, stone: 150, time: 5000 },
   [BuildingType.BLACKSMITH]: { gold: 200, wood: 150, time: 6000 },
 
   [UpgradeType.IRON_SWORDS]: { gold: 150, wood: 100, time: 15000 }, // 15s
@@ -35,6 +36,7 @@ export const UNIT_STATS = {
   [BuildingType.BARRACKS]: { hp: 800, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 10 },
   [BuildingType.FARM]: { hp: 400, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8 },
   [BuildingType.TOWER]: { hp: 600, damage: 30, speed: 0, range: 15.0, attackSpeed: 1000, visionRange: 18 },
+  [BuildingType.CANNON_TOWER]: { hp: 800, damage: 75, speed: 0, range: 13.0, attackSpeed: 2800, visionRange: 14, splashRadius: 2.5 },
   [BuildingType.BLACKSMITH]: { hp: 700, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8 },
   
   // Resources
@@ -64,6 +66,7 @@ export const QUEUE_SIZE = 5;
 export const BUILDING_PRIORITY = [
   BuildingType.TOWN_HALL,
   BuildingType.BARRACKS,
+  BuildingType.CANNON_TOWER,
   BuildingType.TOWER,
   BuildingType.BLACKSMITH,
   BuildingType.FARM

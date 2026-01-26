@@ -38,11 +38,23 @@ const getCameraDirections = (camera: THREE.Camera) => {
 const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> = ({ type, position }) => {
   const isTownHall = type === BuildingType.TOWN_HALL;
   const isTower = type === BuildingType.TOWER;
+  const isCannonTower = type === BuildingType.CANNON_TOWER;
   const isBlacksmith = type === BuildingType.BLACKSMITH;
   
   return (
     <group position={position}>
-      {isTower ? (
+      {isCannonTower ? (
+        <group>
+            <mesh position={[0, 1.5, 0]} raycast={() => null}>
+                <cylinderGeometry args={[1.5, 2.0, 3, 8]} />
+                <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+            </mesh>
+            <mesh position={[0, 2.5, 1.2]} rotation={[Math.PI/6, 0, 0]} raycast={() => null}>
+                <cylinderGeometry args={[0.3, 0.4, 2, 8]} />
+                <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+            </mesh>
+        </group>
+      ) : isTower ? (
         <mesh position={[0, 2, 0]} raycast={() => null}>
             <cylinderGeometry args={[0.8, 1.2, 4, 6]} />
             <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />

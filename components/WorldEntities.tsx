@@ -66,11 +66,13 @@ export const FloatingText3D: React.FC<{ data: FloatingText }> = ({ data }) => {
 
 export const Projectile3D: React.FC<{ data: Projectile, startPos: any, endPos: any }> = ({ data, startPos, endPos }) => {
     const meshRef = useRef<THREE.Mesh>(null);
+    const isCannonball = data.splash;
     
     useFrame(() => {
         if(meshRef.current) {
             meshRef.current.position.x = THREE.MathUtils.lerp(startPos.x, endPos.x, data.progress);
-            meshRef.current.position.y = THREE.MathUtils.lerp(startPos.y + 1, endPos.y + 1, data.progress) + Math.sin(data.progress * Math.PI) * 2;
+            const arcHeight = isCannonball ? 4 : 2;
+            meshRef.current.position.y = THREE.MathUtils.lerp(startPos.y + 1, endPos.y + 1, data.progress) + Math.sin(data.progress * Math.PI) * arcHeight;
             meshRef.current.position.z = THREE.MathUtils.lerp(startPos.z, endPos.z, data.progress);
             meshRef.current.lookAt(endPos.x, endPos.y, endPos.z);
         }
@@ -78,8 +80,17 @@ export const Projectile3D: React.FC<{ data: Projectile, startPos: any, endPos: a
 
     return (
         <mesh ref={meshRef}>
-            <coneGeometry args={[0.05, 0.4, 8]} rotation={[Math.PI/2, 0, 0]}/>
-            <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
+            {isCannonball ? (
+                <>
+                    <sphereGeometry args={[0.3, 8, 8]} />
+                    <meshStandardMaterial color="#1c1917" metalness={0.8} roughness={0.3} />
+                </>
+            ) : (
+                <>
+                    <coneGeometry args={[0.05, 0.4, 8]} rotation={[Math.PI/2, 0, 0]}/>
+                    <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.5} />
+                </>
+            )}
         </mesh>
     );
 };
@@ -188,6 +199,7 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
 export const Building3D: React.FC<EntityProps> = ({ entity }) => {
   const isTownHall = entity.subType === BuildingType.TOWN_HALL;
   const isTower = entity.subType === BuildingType.TOWER;
+  const isCannonTower = entity.subType === BuildingType.CANNON_TOWER;
   const isBlacksmith = entity.subType === BuildingType.BLACKSMITH;
   
   if (!entity.visible && entity.faction !== Faction.PLAYER) return null;
@@ -196,12 +208,30 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
     <group position={[entity.position.x, entity.position.y, entity.position.z]}>
       {entity.selected && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-          <ringGeometry args={[isTower ? 1.2 : 2.2, isTower ? 1.5 : 2.5, 32]} />
+          <ringGeometry args={[isTower || isCannonTower ? 1.2 : 2.2, isTower || isCannonTower ? 1.5 : 2.5, 32]} />
           <meshBasicMaterial color={COLORS.SELECTION} opacity={0.6} transparent side={THREE.DoubleSide} />
         </mesh>
       )}
 
-      {isTower ? (
+      {isCannonTower ? (
+        <group>
+            {/* Wider, squatter base */}
+            <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
+                <cylinderGeometry args={[1.5, 2.0, 3, 8]} />
+                <meshStandardMaterial color="#44403c" />
+            </mesh>
+            {/* Cannon barrel */}
+            <mesh position={[0, 2.5, 1.2]} rotation={[Math.PI/6, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.3, 0.4, 2, 8]} />
+                <meshStandardMaterial color="#1c1917" metalness={0.6} roughness={0.4} />
+            </mesh>
+            {/* Platform top */}
+            <mesh position={[0, 3.2, 0]} castShadow>
+                <cylinderGeometry args={[1.8, 1.5, 0.5, 8]} />
+                <meshStandardMaterial color={entity.faction === Faction.PLAYER ? "#1e3a8a" : "#7f1d1d"} />
+            </mesh>
+        </group>
+      ) : isTower ? (
         <group>
             <mesh position={[0, 2, 0]} castShadow receiveShadow>
                 <cylinderGeometry args={[0.8, 1.2, 4, 6]} />
