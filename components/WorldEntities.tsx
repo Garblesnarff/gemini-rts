@@ -1,6 +1,4 @@
-
-
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -96,9 +94,10 @@ export const Projectile3D: React.FC<{ data: Projectile, startPos: any, endPos: a
 };
 
 export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
-  const meshRef = useRef<THREE.Group>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const bodyRef = useRef<THREE.Mesh>(null);
+  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   
-  // All hooks must be at the top level
   const geometry = useMemo(() => {
     if (entity.subType === UnitType.PEASANT) return <cylinderGeometry args={[0.3, 0.3, 1, 8]} />;
     if (entity.subType === UnitType.FOOTMAN) return <capsuleGeometry args={[0.4, 1, 4, 8]} />;
@@ -108,22 +107,52 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
   }, [entity.subType]);
 
   useFrame((state, delta) => {
-    if (meshRef.current) {
-      const currentPos = meshRef.current.position;
+    // 1. Position Interpolation
+    if (groupRef.current) {
+      const currentPos = groupRef.current.position;
       const targetX = entity.position.x;
       const targetZ = entity.position.z;
       
       currentPos.x = THREE.MathUtils.lerp(currentPos.x, targetX, 15 * delta);
       currentPos.z = THREE.MathUtils.lerp(currentPos.z, targetZ, 15 * delta);
       
+      // Face direction of movement
       if ((entity.targetPos && entity.state === 'moving') || entity.state === 'gathering' || entity.state === 'returning' || entity.state === 'attacking') {
           const dx = targetX - currentPos.x;
           const dz = targetZ - currentPos.z;
           if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
               const angle = Math.atan2(dx, dz);
-              meshRef.current.rotation.y = angle;
+              groupRef.current.rotation.y = angle;
           }
       }
+    }
+
+    // 2. Procedural Walking Animation (Bobbing / Swaying)
+    if (bodyRef.current) {
+        if (entity.state === 'moving' || entity.state === 'gathering' || entity.state === 'returning' || (entity.state === 'attacking' && !entity.holdPosition)) {
+            const speed = 15;
+            const bounce = Math.abs(Math.sin(state.clock.elapsedTime * speed)) * 0.1;
+            const sway = Math.sin(state.clock.elapsedTime * speed) * 0.05;
+            
+            bodyRef.current.position.y = 0.6 + bounce;
+            bodyRef.current.rotation.z = sway;
+        } else {
+            // Return to rest
+            bodyRef.current.position.y = THREE.MathUtils.lerp(bodyRef.current.position.y, 0.6, 5 * delta);
+            bodyRef.current.rotation.z = THREE.MathUtils.lerp(bodyRef.current.rotation.z, 0, 5 * delta);
+        }
+    }
+
+    // 3. Damage Flash
+    if (materialRef.current) {
+        const timeSinceDamage = Date.now() - (entity.lastDamagedAt || 0);
+        if (timeSinceDamage < 150) {
+            materialRef.current.emissive.setHex(0xffffff);
+            materialRef.current.emissiveIntensity = 0.5;
+        } else {
+            materialRef.current.emissive.setHex(0x000000);
+            materialRef.current.emissiveIntensity = 0;
+        }
     }
   });
 
@@ -134,7 +163,7 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
 
   return (
     <group 
-      ref={meshRef} 
+      ref={groupRef} 
       position={[entity.position.x, entity.position.y, entity.position.z]}
     >
       {entity.selected && (
@@ -151,12 +180,19 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
           </mesh>
       )}
 
-      <mesh position={[0, 0.6, 0]} castShadow receiveShadow>
+      {/* Animated Body */}
+      <mesh ref={bodyRef} position={[0, 0.6, 0]} castShadow receiveShadow>
         {geometry}
-        <meshStandardMaterial color={color} roughness={0.7} />
+        <meshStandardMaterial ref={materialRef} color={color} roughness={0.7} />
       </mesh>
       
+      {/* Head/Helmet (Follows body position roughly, but simplified here fixed to group for stability or attached to body?) */}
+      {/* Attaching to bodyRef would require wrapping geometry. Simplified: Just swaying the main mesh. */}
+      {/* We add a separate head mesh that also bobs? Ideally it should be child of bodyRef, but we are using primitive geometry. */}
+      {/* For this MVP, we just animate the main body mesh. We re-add details relative to the group. */}
+
       <mesh position={[0, 1.3, 0]}>
+         {/* Simple Head, not animated for sway to keep it stable, or animate manually */}
         <sphereGeometry args={[0.25, 8, 8]} />
         <meshStandardMaterial color="#fca5a5" />
       </mesh>

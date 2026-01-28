@@ -71,13 +71,14 @@ const findEnemyTarget = (enemy: Entity, allEntities: Entity[], now: number): Ent
     const playerEntities = allEntities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
     if (playerEntities.length === 0) return null;
 
-    // 1. Retaliation
+    // 1. Retaliation: If we were damaged recently, attack the source
     if (enemy.lastDamagedBy && enemy.lastDamagedAt && (now - enemy.lastDamagedAt < RETALIATION_WINDOW)) {
         const attacker = playerEntities.find(e => e.id === enemy.lastDamagedBy);
-        if (attacker) return attacker;
+        if (attacker && attacker.hp > 0) return attacker;
     }
 
     // 2. Aggro Range (Nearby Units)
+    // Always prioritize immediate threats in proximity
     const nearbyUnits = playerEntities.filter(e => e.type === EntityType.UNIT);
     let closestUnit = null;
     let closestUnitDist = Infinity;
@@ -91,27 +92,36 @@ const findEnemyTarget = (enemy: Entity, allEntities: Entity[], now: number): Ent
     }
     if (closestUnit) return closestUnit;
 
-    // 3. Buildings Priority
-    const buildings = playerEntities.filter(e => e.type === EntityType.BUILDING);
-    if (buildings.length > 0) {
-        for (const type of BUILDING_PRIORITY) {
-             const typeBuildings = buildings.filter(b => b.subType === type);
-             if (typeBuildings.length > 0) {
-                 // Find closest of this priority type
-                 let closest = null;
-                 let minD = Infinity;
-                 for (const b of typeBuildings) {
-                     const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
-                     if (d < minD) { minD = d; closest = b; }
+    // 3. Strategic Priority (Hunt)
+    // If priority is buildings (Siege logic), look for them first
+    if (enemy.targetPriority === 'buildings') {
+        const buildings = playerEntities.filter(e => e.type === EntityType.BUILDING);
+        if (buildings.length > 0) {
+            // Check specific high-value targets first
+            for (const type of BUILDING_PRIORITY) {
+                 const typeBuildings = buildings.filter(b => b.subType === type);
+                 if (typeBuildings.length > 0) {
+                     let closest = null;
+                     let minD = Infinity;
+                     for (const b of typeBuildings) {
+                         const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
+                         if (d < minD) { minD = d; closest = b; }
+                     }
+                     if (closest) return closest;
                  }
-                 if (closest) return closest;
+            }
+            // Fallback to closest building of any type
+            let closest = null;
+            let minD = Infinity;
+             for (const b of buildings) {
+                 const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
+                 if (d < minD) { minD = d; closest = b; }
              }
+            if (closest) return closest;
         }
-        // Fallback to any building
-        return buildings[0];
     }
 
-    // 4. Any nearest entity (Global search)
+    // 4. Global Fallback (Any nearest entity)
     let globalClosest = null;
     let globalMinD = Infinity;
     for (const p of playerEntities) {
@@ -735,16 +745,25 @@ export default function App() {
                             z: spawnPoint.z + (Math.random() - 0.5) * 10 
                         };
                         
+                        // Determine Unit Type based on wave composition
+                        let subType = UnitType.PEASANT;
+                        if (i % 3 === 0) subType = UnitType.FOOTMAN;
+                        if (currentWave >= 4 && i % 4 === 0) subType = UnitType.FOOTMAN; // More footmen
+                        if (currentWave >= 7 && i % 3 === 1) subType = UnitType.ARCHER; // Add Archers
+                        
+                        // Boss logic for Wave 10
+                        if (currentWave === MAX_WAVES && i === 0) subType = UnitType.KNIGHT; // Mini-boss
+
                         // Create enemy
                         const newEnemy: Entity = {
                             id: uuidv4(),
                             type: EntityType.UNIT,
-                            subType: i % 3 === 0 ? UnitType.FOOTMAN : UnitType.PEASANT, 
+                            subType, 
                             faction: Faction.ENEMY,
                             position: spawnPos,
-                            hp: 420, // Default HP, could scale
-                            maxHp: 420,
-                            state: 'idle', // Will be updated to attacking immediately below or in next loop
+                            hp: UNIT_STATS[subType]?.hp || 420, 
+                            maxHp: UNIT_STATS[subType]?.hp || 420,
+                            state: 'idle', 
                             name: 'Invader',
                             lastAttackTime: 0,
                             visible: false,
@@ -878,8 +897,6 @@ export default function App() {
                 if (p.splash && p.splashRadius) {
                     // Splash Damage: Find entities near the primary target
                     const targetEntity = prev.entities.find(e => e.id === p.targetId);
-                    // We use the target's current position as the impact center. 
-                    // If target is gone, we technically miss the splash, but for simplicity we skip.
                     if (targetEntity) {
                         const splashCenter = targetEntity.position;
                         newEntities.forEach(e => {
@@ -893,6 +910,16 @@ export default function App() {
                                     const splashDmg = Math.floor(p.damage * falloff);
                                     damageMap[e.id] = (damageMap[e.id] || 0) + splashDmg;
                                     
+                                    // Retaliation for splash victims
+                                    if (e.faction === Faction.ENEMY) {
+                                        const source = prev.entities.find(s => s.id === p.sourceId);
+                                        if (source && source.faction === Faction.PLAYER) {
+                                            e.lastDamagedBy = source.id;
+                                            e.lastDamagedAt = now;
+                                            hasChanges = true;
+                                        }
+                                    }
+
                                     if (e.visible) {
                                         newFloatingTexts.push({ 
                                             id: uuidv4(), 
@@ -940,6 +967,9 @@ export default function App() {
 
             const resourceMap: Record<string, number> = {}; 
 
+            // Pre-calculate Obstacles for Collision
+            const obstacles = prev.entities.filter(e => e.type === EntityType.BUILDING || e.type === EntityType.RESOURCE);
+
             // Entity Logic Loop
             newEntities = newEntities.map(entity => {
                 const CARRY_CAPACITY = 10;
@@ -956,6 +986,7 @@ export default function App() {
                     }
                 }
 
+                // Separation Logic (Soft Collision with other Units)
                 if (currentEntity.type === EntityType.UNIT && (currentEntity.state === 'moving' || currentEntity.state === 'attacking' || currentEntity.state === 'gathering' || currentEntity.state === 'returning')) {
                     const separationRadius = 1.0;
                     let moveX = 0, moveZ = 0;
@@ -979,6 +1010,28 @@ export default function App() {
                         pos.z += moveZ * pushStrength;
                         hasChanges = true;
                     }
+
+                    // --- Hard Collision with Buildings/Resources ---
+                    const unitRadius = (stats as any).collisionRadius || 0.5;
+                    obstacles.forEach(obs => {
+                        const obsStats = UNIT_STATS[obs.subType as keyof typeof UNIT_STATS];
+                        const obsRadius = (obsStats as any)?.collisionRadius || 2.0;
+                        const minSeparation = unitRadius + obsRadius;
+                        
+                        const dx = pos.x - obs.position.x;
+                        const dz = pos.z - obs.position.z;
+                        const dist = Math.sqrt(dx*dx + dz*dz);
+                        
+                        if (dist < minSeparation) {
+                            // Push out
+                            const pushFactor = (minSeparation - dist) / dist;
+                            if (dist > 0.001) {
+                                pos.x += dx * pushFactor;
+                                pos.z += dz * pushFactor;
+                                hasChanges = true;
+                            }
+                        }
+                    });
                 }
 
                 if (currentEntity.type === EntityType.UNIT && currentEntity.faction === Faction.PLAYER) {
@@ -1017,7 +1070,7 @@ export default function App() {
                     }
                 }
                 
-                // --- ENEMY AI REWRITE ---
+                // --- ENEMY AI LOGIC ---
                 if (currentEntity.faction === Faction.ENEMY && currentEntity.type === EntityType.UNIT) {
                     // Check if current target is invalid
                     let needsNewTarget = false;
