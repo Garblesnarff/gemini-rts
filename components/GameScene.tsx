@@ -1,5 +1,3 @@
-
-
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Sky, Html } from '@react-three/drei';
@@ -103,6 +101,7 @@ const ClickMarker: React.FC<{ position: THREE.Vector3, color?: string }> = ({ po
 const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
     const GRID_SIZE = 256; 
     const WORLD_SIZE = MAP_SIZE;
+    const frameCount = useRef(0);
     
     // Create texture and data buffer once.
     const { texture, data } = useMemo(() => {
@@ -165,6 +164,10 @@ const FogOfWarOverlay: React.FC<{ entities: Entity[] }> = ({ entities }) => {
     }), [texture]);
 
     useFrame(() => {
+        frameCount.current++;
+        // OPTIMIZATION: Update fog only every 4 frames
+        if (frameCount.current % 4 !== 0) return;
+
         // 1. Decay visibility: Active (255) -> Explored (128)
         // Stride 4 for RGBA
         for (let i = 0; i < data.length; i+=4) {

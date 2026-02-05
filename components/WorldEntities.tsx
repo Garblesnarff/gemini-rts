@@ -1,6 +1,6 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import { Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { Entity, UnitType, BuildingType, ResourceType, Faction, Projectile, FloatingText, Position } from '../types';
 import { COLORS } from '../constants';
@@ -9,16 +9,34 @@ interface EntityProps {
   entity: Entity;
 }
 
+// --- Shared Geometries ---
+// Reusing geometries reduces GPU memory overhead and setup time
+const PEASANT_GEO = new THREE.CylinderGeometry(0.3, 0.3, 1, 8);
+const FOOTMAN_GEO = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+const KNIGHT_GEO = new THREE.BoxGeometry(0.8, 1.4, 1.2);
+const ARCHER_GEO = new THREE.CylinderGeometry(0.2, 0.3, 1.1, 6);
+const DEFAULT_UNIT_GEO = new THREE.BoxGeometry(0.5, 1, 0.5);
+
+// Adjust pivots if necessary by translating geometry, or handle in mesh position
+PEASANT_GEO.translate(0, 0, 0); 
+
 const HealthBar = ({ hp, maxHp }: { hp: number; maxHp: number }) => {
+  const healthPct = Math.max(0, hp / maxHp);
+  const width = 1.2;
+  const height = 0.15;
+
+  // Optimized: Use simple meshes in a Billboard instead of HTML overlay
   return (
-    <Html position={[0, 3, 0]} center distanceFactor={12} style={{ pointerEvents: 'none' }}>
-      <div className="w-12 h-1.5 bg-gray-900 border border-gray-700 rounded-sm overflow-hidden">
-        <div 
-          className="h-full bg-gradient-to-r from-green-500 to-green-400" 
-          style={{ width: `${Math.max(0, (hp / maxHp) * 100)}%` }}
-        />
-      </div>
-    </Html>
+    <Billboard position={[0, 3.5, 0]}>
+        <mesh position={[0, 0, 0]}>
+            <planeGeometry args={[width + 0.05, height + 0.05]} />
+            <meshBasicMaterial color="black" />
+        </mesh>
+        <mesh position={[(-width + (width * healthPct)) / 2, 0, 0.01]}>
+            <planeGeometry args={[width * healthPct, height]} />
+            <meshBasicMaterial color={healthPct > 0.5 ? "#22c55e" : "#ef4444"} />
+        </mesh>
+    </Billboard>
   );
 };
 
@@ -45,20 +63,21 @@ export const RallyPoint3D: React.FC<{ pos: Position }> = ({ pos }) => {
 };
 
 export const FloatingText3D: React.FC<{ data: FloatingText }> = ({ data }) => {
+    // Optimized: Use Drei Text instead of HTML
     return (
-        <group position={[data.position.x, data.position.y + 2 + (1 - data.life) * 2, data.position.z]}>
-             <Html center style={{ pointerEvents: 'none' }}>
-                <span style={{ 
-                    color: data.color, 
-                    fontWeight: 'bold', 
-                    fontSize: '16px', 
-                    textShadow: '1px 1px 2px black',
-                    opacity: data.life 
-                }}>
-                    {data.text}
-                </span>
-            </Html>
-        </group>
+        <Billboard position={[data.position.x, data.position.y + 2 + (1 - data.life) * 3, data.position.z]}>
+             <Text
+                fontSize={0.8}
+                color={data.color}
+                outlineWidth={0.05}
+                outlineColor="black"
+                fillOpacity={data.life} // Fade out
+                outlineOpacity={data.life}
+                characters="0123456789+-"
+             >
+                {data.text}
+             </Text>
+        </Billboard>
     );
 }
 
@@ -98,12 +117,13 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
   const bodyRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
   
+  // Use Shared Geometry
   const geometry = useMemo(() => {
-    if (entity.subType === UnitType.PEASANT) return <cylinderGeometry args={[0.3, 0.3, 1, 8]} />;
-    if (entity.subType === UnitType.FOOTMAN) return <capsuleGeometry args={[0.4, 1, 4, 8]} />;
-    if (entity.subType === UnitType.KNIGHT) return <boxGeometry args={[0.8, 1.4, 1.2]} />;
-    if (entity.subType === UnitType.ARCHER) return <cylinderGeometry args={[0.2, 0.3, 1.1, 6]} />; 
-    return <boxGeometry args={[0.5, 1, 0.5]} />;
+    if (entity.subType === UnitType.PEASANT) return PEASANT_GEO;
+    if (entity.subType === UnitType.FOOTMAN) return FOOTMAN_GEO;
+    if (entity.subType === UnitType.KNIGHT) return KNIGHT_GEO;
+    if (entity.subType === UnitType.ARCHER) return ARCHER_GEO; 
+    return DEFAULT_UNIT_GEO;
   }, [entity.subType]);
 
   useFrame((state, delta) => {
@@ -181,18 +201,11 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
       )}
 
       {/* Animated Body */}
-      <mesh ref={bodyRef} position={[0, 0.6, 0]} castShadow receiveShadow>
-        {geometry}
+      <mesh ref={bodyRef} position={[0, 0.6, 0]} geometry={geometry} castShadow receiveShadow>
         <meshStandardMaterial ref={materialRef} color={color} roughness={0.7} />
       </mesh>
       
-      {/* Head/Helmet (Follows body position roughly, but simplified here fixed to group for stability or attached to body?) */}
-      {/* Attaching to bodyRef would require wrapping geometry. Simplified: Just swaying the main mesh. */}
-      {/* We add a separate head mesh that also bobs? Ideally it should be child of bodyRef, but we are using primitive geometry. */}
-      {/* For this MVP, we just animate the main body mesh. We re-add details relative to the group. */}
-
       <mesh position={[0, 1.3, 0]}>
-         {/* Simple Head, not animated for sway to keep it stable, or animate manually */}
         <sphereGeometry args={[0.25, 8, 8]} />
         <meshStandardMaterial color="#fca5a5" />
       </mesh>
@@ -227,7 +240,9 @@ export const Unit3D: React.FC<EntityProps> = ({ entity }) => {
           </group>
       )}
 
-      <HealthBar hp={entity.hp} maxHp={entity.maxHp} />
+      {(entity.selected || entity.hp < entity.maxHp) && (
+          <HealthBar hp={entity.hp} maxHp={entity.maxHp} />
+      )}
     </group>
   );
 };
@@ -310,7 +325,9 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
         </group>
       )}
 
-      <HealthBar hp={entity.hp} maxHp={entity.maxHp} />
+      {(entity.selected || entity.hp < entity.maxHp) && (
+          <HealthBar hp={entity.hp} maxHp={entity.maxHp} />
+      )}
     </group>
   );
 };

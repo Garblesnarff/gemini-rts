@@ -93,32 +93,30 @@ const findEnemyTarget = (enemy: Entity, allEntities: Entity[], now: number): Ent
     if (closestUnit) return closestUnit;
 
     // 3. Strategic Priority (Hunt)
-    // If priority is buildings (Siege logic), look for them first
-    if (enemy.targetPriority === 'buildings') {
-        const buildings = playerEntities.filter(e => e.type === EntityType.BUILDING);
-        if (buildings.length > 0) {
-            // Check specific high-value targets first
-            for (const type of BUILDING_PRIORITY) {
-                 const typeBuildings = buildings.filter(b => b.subType === type);
-                 if (typeBuildings.length > 0) {
-                     let closest = null;
-                     let minD = Infinity;
-                     for (const b of typeBuildings) {
-                         const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
-                         if (d < minD) { minD = d; closest = b; }
-                     }
-                     if (closest) return closest;
+    // Look for buildings first if no units are nearby to threaten us
+    const buildings = playerEntities.filter(e => e.type === EntityType.BUILDING);
+    if (buildings.length > 0) {
+        // Check specific high-value targets first
+        for (const type of BUILDING_PRIORITY) {
+             const typeBuildings = buildings.filter(b => b.subType === type);
+             if (typeBuildings.length > 0) {
+                 let closest = null;
+                 let minD = Infinity;
+                 for (const b of typeBuildings) {
+                     const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
+                     if (d < minD) { minD = d; closest = b; }
                  }
-            }
-            // Fallback to closest building of any type
-            let closest = null;
-            let minD = Infinity;
-             for (const b of buildings) {
-                 const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
-                 if (d < minD) { minD = d; closest = b; }
+                 if (closest) return closest;
              }
-            if (closest) return closest;
         }
+        // Fallback to closest building of any type
+        let closest = null;
+        let minD = Infinity;
+         for (const b of buildings) {
+             const d = Math.sqrt(Math.pow(enemy.position.x - b.position.x, 2) + Math.pow(enemy.position.z - b.position.z, 2));
+             if (d < minD) { minD = d; closest = b; }
+         }
+        if (closest) return closest;
     }
 
     // 4. Global Fallback (Any nearest entity)
