@@ -19,7 +19,11 @@ export enum BuildingType {
   FARM = 'Farm',
   TOWER = 'Scout Tower',
   CANNON_TOWER = 'Cannon Tower',
-  BLACKSMITH = 'Blacksmith'
+  BLACKSMITH = 'Blacksmith',
+  LUMBER_MILL = 'Lumber Mill',
+  STABLE = 'Stable',
+  TEMPLE = 'Temple',
+  WALL = 'Wall'
 }
 
 export enum ResourceType {
@@ -120,7 +124,7 @@ export interface FloatingText {
 export interface PlacementMode {
   active: boolean;
   type: BuildingType | null;
-  cost: { gold: number; wood: number; stone?: number };
+  cost: { gold: number; wood: number; stone?: number; iron?: number };
 }
 
 export interface CommandMode {

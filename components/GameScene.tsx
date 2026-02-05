@@ -38,6 +38,10 @@ const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> =
   const isTower = type === BuildingType.TOWER;
   const isCannonTower = type === BuildingType.CANNON_TOWER;
   const isBlacksmith = type === BuildingType.BLACKSMITH;
+  const isLumberMill = type === BuildingType.LUMBER_MILL;
+  const isStable = type === BuildingType.STABLE;
+  const isTemple = type === BuildingType.TEMPLE;
+  const isWall = type === BuildingType.WALL;
   
   return (
     <group position={position}>
@@ -62,6 +66,26 @@ const GhostBuilding: React.FC<{ type: BuildingType, position: THREE.Vector3 }> =
             <boxGeometry args={[3, 3, 3]} />
             <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
         </mesh>
+      ) : isLumberMill ? (
+        <mesh position={[0, 1, 0]} raycast={() => null}>
+            <boxGeometry args={[3, 2, 3]} />
+            <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+        </mesh>
+      ) : isStable ? (
+        <mesh position={[0, 1, 0]} raycast={() => null}>
+            <boxGeometry args={[4, 2, 3]} />
+            <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+        </mesh>
+      ) : isTemple ? (
+        <mesh position={[0, 2, 0]} raycast={() => null}>
+             <cylinderGeometry args={[2, 2.2, 4, 8]} />
+            <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+        </mesh>
+      ) : isWall ? (
+         <mesh position={[0, 1.25, 0]} raycast={() => null}>
+             <boxGeometry args={[2, 2.5, 0.5]} />
+             <meshBasicMaterial color="#3b82f6" transparent opacity={0.4} />
+         </mesh>
       ) : (
           <>
             <mesh position={[0, 1, 0]} raycast={() => null}>

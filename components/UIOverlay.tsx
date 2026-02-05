@@ -22,7 +22,11 @@ import {
   Hand,
   Mountain,
   Triangle,
-  Hourglass
+  Hourglass,
+  BrickWall,
+  Church,
+  Axe,
+  PawPrint
 } from 'lucide-react';
 import { GameState, Entity, UnitType, BuildingType, EntityType, Faction, UpgradeType } from '../types';
 import { COSTS, UNIT_STATS, MAP_SIZE } from '../constants';
@@ -52,6 +56,10 @@ const Portrait = ({ type }: { type: string }) => {
     [BuildingType.TOWER]: 'bg-stone-500',
     [BuildingType.CANNON_TOWER]: 'bg-stone-900',
     [BuildingType.BLACKSMITH]: 'bg-stone-700',
+    [BuildingType.LUMBER_MILL]: 'bg-amber-800',
+    [BuildingType.STABLE]: 'bg-orange-300',
+    [BuildingType.TEMPLE]: 'bg-yellow-100',
+    [BuildingType.WALL]: 'bg-stone-600',
   };
 
   return (
@@ -77,6 +85,8 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   const selectedCount = gameState.selection.length;
   const primarySelectionId = gameState.selection[0];
   const selectedEntity = gameState.entities.find(e => e.id === primarySelectionId);
+
+  const hasLumberMill = gameState.entities.some(e => e.subType === BuildingType.LUMBER_MILL && e.faction === Faction.PLAYER && e.hp > 0);
 
   const handleMinimapInteraction = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -269,7 +279,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
         </div>
 
         {/* Command Card */}
-        <div className="flex-1 bg-stone-900 p-4 grid grid-cols-4 grid-rows-2 gap-2">
+        <div className="flex-1 bg-stone-900 p-4 grid grid-cols-5 grid-rows-2 gap-2">
              {/* General Unit Commands */}
              {selectedEntity && selectedEntity.type === EntityType.UNIT && selectedEntity.faction === Faction.PLAYER && (
                  <>
@@ -385,21 +395,21 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                 <>
                  <ActionButton 
                     icon={<Hammer />} 
-                    label="Build Barracks" 
+                    label="Barracks" 
                     cost={COSTS[BuildingType.BARRACKS]} 
                     onClick={() => onBuild(BuildingType.BARRACKS)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.BARRACKS].gold}
                  />
                   <ActionButton 
                     icon={<Hammer />} 
-                    label="Build Farm" 
+                    label="Farm" 
                     cost={COSTS[BuildingType.FARM]} 
                     onClick={() => onBuild(BuildingType.FARM)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.FARM].gold}
                  />
                  <ActionButton 
                     icon={<TowerControl />} 
-                    label="Build Tower" 
+                    label="Scout Tower" 
                     cost={COSTS[BuildingType.TOWER]} 
                     onClick={() => onBuild(BuildingType.TOWER)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.TOWER].gold || gameState.resources.wood < COSTS[BuildingType.TOWER].wood}
@@ -409,7 +419,8 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     label="Cannon Tower" 
                     cost={COSTS[BuildingType.CANNON_TOWER]} 
                     onClick={() => onBuild(BuildingType.CANNON_TOWER)} 
-                    disabled={gameState.resources.gold < COSTS[BuildingType.CANNON_TOWER].gold || gameState.resources.stone < (COSTS[BuildingType.CANNON_TOWER].stone || 0)}
+                    disabled={!hasLumberMill || gameState.resources.gold < COSTS[BuildingType.CANNON_TOWER].gold || gameState.resources.stone < (COSTS[BuildingType.CANNON_TOWER].stone || 0)}
+                    tooltipReason={!hasLumberMill ? "Requires Lumber Mill" : undefined}
                  />
                  <ActionButton 
                     icon={<Anvil />} 
@@ -417,6 +428,34 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
                     cost={COSTS[BuildingType.BLACKSMITH]} 
                     onClick={() => onBuild(BuildingType.BLACKSMITH)} 
                     disabled={gameState.resources.gold < COSTS[BuildingType.BLACKSMITH].gold || gameState.resources.wood < COSTS[BuildingType.BLACKSMITH].wood}
+                 />
+                 <ActionButton 
+                    icon={<Axe />} 
+                    label="Lumber Mill" 
+                    cost={COSTS[BuildingType.LUMBER_MILL]} 
+                    onClick={() => onBuild(BuildingType.LUMBER_MILL)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.LUMBER_MILL].gold || gameState.resources.wood < COSTS[BuildingType.LUMBER_MILL].wood}
+                 />
+                  <ActionButton 
+                    icon={<PawPrint />} 
+                    label="Stable" 
+                    cost={COSTS[BuildingType.STABLE]} 
+                    onClick={() => onBuild(BuildingType.STABLE)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.STABLE].gold || gameState.resources.wood < COSTS[BuildingType.STABLE].wood || gameState.resources.iron < (COSTS[BuildingType.STABLE].iron || 0)}
+                 />
+                  <ActionButton 
+                    icon={<Church />} 
+                    label="Temple" 
+                    cost={COSTS[BuildingType.TEMPLE]} 
+                    onClick={() => onBuild(BuildingType.TEMPLE)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.TEMPLE].gold || gameState.resources.stone < (COSTS[BuildingType.TEMPLE].stone || 0) || gameState.resources.iron < (COSTS[BuildingType.TEMPLE].iron || 0)}
+                 />
+                  <ActionButton 
+                    icon={<BrickWall />} 
+                    label="Wall" 
+                    cost={COSTS[BuildingType.WALL]} 
+                    onClick={() => onBuild(BuildingType.WALL)} 
+                    disabled={gameState.resources.gold < COSTS[BuildingType.WALL].gold || gameState.resources.stone < (COSTS[BuildingType.WALL].stone || 0)}
                  />
                 </>
             )}
@@ -426,7 +465,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   );
 };
 
-const ActionButton = ({ icon, label, cost, onClick, disabled }: any) => (
+const ActionButton = ({ icon, label, cost, onClick, disabled, tooltipReason }: any) => (
     <button 
         onClick={onClick}
         disabled={disabled}
@@ -437,14 +476,16 @@ const ActionButton = ({ icon, label, cost, onClick, disabled }: any) => (
         `}
     >
         {icon}
-        <span className="text-[10px] mt-1 font-bold uppercase">{label}</span>
+        <span className="text-[10px] mt-1 font-bold uppercase whitespace-nowrap overflow-hidden text-ellipsis w-full text-center">{label}</span>
         
         {/* Tooltip */}
-        <div className="absolute bottom-full mb-2 hidden group-hover:block w-32 bg-black border border-gold-500 p-2 text-xs text-white z-50">
+        <div className="absolute bottom-full mb-2 hidden group-hover:block w-32 bg-black border border-gold-500 p-2 text-xs text-white z-50 pointer-events-none">
             <div className="font-bold mb-1">{label}</div>
+            {tooltipReason && <div className="text-red-500 font-bold mb-1">{tooltipReason}</div>}
             <div className="text-gold-400">Gold: {cost.gold}</div>
             {cost.wood > 0 && <div className="text-green-400">Wood: {cost.wood}</div>}
             {cost.stone > 0 && <div className="text-gray-400">Stone: {cost.stone}</div>}
+            {cost.iron > 0 && <div className="text-orange-400">Iron: {cost.iron}</div>}
             {cost.food !== undefined && <div className="text-red-400">Food: {cost.food}</div>}
         </div>
     </button>

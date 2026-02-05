@@ -15,6 +15,10 @@ export const COSTS = {
   [BuildingType.TOWER]:    { gold: 150, wood: 120, time: 4000 },
   [BuildingType.CANNON_TOWER]: { gold: 200, wood: 0, stone: 150, time: 5000 },
   [BuildingType.BLACKSMITH]: { gold: 200, wood: 150, time: 6000 },
+  [BuildingType.LUMBER_MILL]: { gold: 150, wood: 80, time: 5000 },
+  [BuildingType.STABLE]: { gold: 250, wood: 100, iron: 50, time: 6000 },
+  [BuildingType.TEMPLE]: { gold: 300, wood: 0, stone: 100, iron: 75, time: 8000 },
+  [BuildingType.WALL]: { gold: 10, wood: 0, stone: 50, time: 1500 },
 
   [UpgradeType.IRON_SWORDS]: { gold: 150, wood: 100, time: 15000 }, // 15s
   [UpgradeType.STEEL_ARROWS]: { gold: 150, wood: 150, time: 15000 },
@@ -36,6 +40,10 @@ export const UNIT_STATS = {
   [BuildingType.TOWER]: { hp: 600, damage: 30, speed: 0, range: 15.0, attackSpeed: 1000, visionRange: 18, collisionRadius: 1.2 },
   [BuildingType.CANNON_TOWER]: { hp: 800, damage: 75, speed: 0, range: 13.0, attackSpeed: 2800, visionRange: 14, splashRadius: 2.5, collisionRadius: 1.5 },
   [BuildingType.BLACKSMITH]: { hp: 700, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8, collisionRadius: 2.0 },
+  [BuildingType.LUMBER_MILL]: { hp: 600, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8, collisionRadius: 2.0 },
+  [BuildingType.STABLE]: { hp: 700, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 8, collisionRadius: 2.2 },
+  [BuildingType.TEMPLE]: { hp: 800, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 10, collisionRadius: 2.0 },
+  [BuildingType.WALL]: { hp: 500, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 4, collisionRadius: 1.0 },
   
   // Resources
   'Gold': { hp: 15000, damage: 0, speed: 0, range: 0, attackSpeed: 0, visionRange: 0, collisionRadius: 1.5 },
@@ -67,7 +75,11 @@ export const BUILDING_PRIORITY = [
   BuildingType.CANNON_TOWER,
   BuildingType.TOWER,
   BuildingType.BLACKSMITH,
-  BuildingType.FARM
+  BuildingType.FARM,
+  BuildingType.LUMBER_MILL,
+  BuildingType.STABLE,
+  BuildingType.TEMPLE,
+  BuildingType.WALL
 ];
 
 export const ENEMY_SPAWN_POINTS = [

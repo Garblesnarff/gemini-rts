@@ -850,6 +850,9 @@ export default function App() {
 
             // 3. VISIBILITY & ENTITY UPDATE LOOP
             const playerEntities = newEntities.filter(e => e.faction === Faction.PLAYER && e.hp > 0);
+            const damageMap: Record<string, number> = {};
+            const resourceMap: Record<string, number> = {}; 
+            const healingMap: Record<string, number> = {}; // New Map for Healing
             
             // Fog of War Logic
             newEntities = newEntities.map(entity => {
@@ -889,7 +892,6 @@ export default function App() {
             if (hitProjectiles.length > 0 || newProjectiles.length !== prev.projectiles.length) hasChanges = true;
 
             // Damage Calc
-            const damageMap: Record<string, number> = {};
             hitProjectiles.forEach(p => {
                 
                 if (p.splash && p.splashRadius) {
@@ -962,8 +964,6 @@ export default function App() {
                     }
                 }
             });
-
-            const resourceMap: Record<string, number> = {}; 
 
             // Pre-calculate Obstacles for Collision
             const obstacles = prev.entities.filter(e => e.type === EntityType.BUILDING || e.type === EntityType.RESOURCE);
@@ -1098,6 +1098,30 @@ export default function App() {
                     }
                 }
                 
+                // --- Temple Healing Logic ---
+                if (currentEntity.subType === BuildingType.TEMPLE && currentEntity.faction === Faction.PLAYER && currentEntity.hp > 0) {
+                     if (now - currentEntity.lastAttackTime > 2000) {
+                         // Range 8 healing
+                         prev.entities.forEach(target => {
+                            if (target.faction === Faction.PLAYER && target.type === EntityType.UNIT && target.hp < target.maxHp && target.hp > 0) {
+                                const distSq = Math.pow(currentEntity.position.x - target.position.x, 2) + Math.pow(currentEntity.position.z - target.position.z, 2);
+                                if (distSq <= 64) { // 8 * 8
+                                     healingMap[target.id] = (healingMap[target.id] || 0) + 5;
+                                     newFloatingTexts.push({
+                                         id: uuidv4(),
+                                         text: "+5",
+                                         position: { ...target.position, y: 3 },
+                                         color: "#22c55e",
+                                         life: 1
+                                     });
+                                     hasChanges = true;
+                                }
+                            }
+                         });
+                         currentEntity.lastAttackTime = now;
+                     }
+                }
+
                 if ((currentEntity.subType === BuildingType.TOWER || currentEntity.subType === BuildingType.CANNON_TOWER) && currentEntity.faction === Faction.PLAYER) {
                     if (now - currentEntity.lastAttackTime > stats.attackSpeed) {
                          const range = stats.range || 15;
@@ -1324,6 +1348,11 @@ export default function App() {
                 if (damageMap[e.id]) newHp -= damageMap[e.id];
                 if (resourceMap[e.id]) newHp -= resourceMap[e.id]; 
                 
+                // Apply Healing
+                if (healingMap[e.id]) {
+                     newHp = Math.min(e.maxHp, newHp + healingMap[e.id]);
+                }
+
                 if (newHp <= 0 && e.hp > 0) {
                      if (e.faction === Faction.PLAYER && e.type === EntityType.UNIT) newStats.unitsLost++;
                      if (e.faction === Faction.ENEMY && e.type === EntityType.UNIT) newStats.enemiesKilled++;

@@ -252,6 +252,10 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
   const isTower = entity.subType === BuildingType.TOWER;
   const isCannonTower = entity.subType === BuildingType.CANNON_TOWER;
   const isBlacksmith = entity.subType === BuildingType.BLACKSMITH;
+  const isLumberMill = entity.subType === BuildingType.LUMBER_MILL;
+  const isStable = entity.subType === BuildingType.STABLE;
+  const isTemple = entity.subType === BuildingType.TEMPLE;
+  const isWall = entity.subType === BuildingType.WALL;
   
   if (!entity.visible && entity.faction !== Faction.PLAYER) return null;
 
@@ -259,7 +263,7 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
     <group position={[entity.position.x, entity.position.y, entity.position.z]}>
       {entity.selected && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-          <ringGeometry args={[isTower || isCannonTower ? 1.2 : 2.2, isTower || isCannonTower ? 1.5 : 2.5, 32]} />
+          <ringGeometry args={[isTower || isCannonTower || isWall ? 1.2 : 2.2, isTower || isCannonTower || isWall ? 1.5 : 2.5, 32]} />
           <meshBasicMaterial color={COLORS.SELECTION} opacity={0.6} transparent side={THREE.DoubleSide} />
         </mesh>
       )}
@@ -310,6 +314,66 @@ export const Building3D: React.FC<EntityProps> = ({ entity }) => {
                    </bufferGeometry>
                    <pointsMaterial color="orange" size={0.5} />
                 </points>
+            </mesh>
+        </group>
+      ) : isLumberMill ? (
+        <group>
+            {/* Base */}
+            <mesh position={[0, 1.0, 0]} castShadow receiveShadow>
+                <boxGeometry args={[3, 2, 3]} />
+                <meshStandardMaterial color="#3f2e21" />
+            </mesh>
+            {/* Sloped Roof */}
+            <mesh position={[0, 2.5, 0]} castShadow>
+                <cylinderGeometry args={[0, 2.2, 1.5, 4]} rotation={[0, Math.PI/4, 0]} />
+                <meshStandardMaterial color="#5d4037" />
+            </mesh>
+            {/* Log Pile */}
+            <mesh position={[1.5, 0.2, 1.5]} rotation={[0, 0, Math.PI/2]}>
+                <cylinderGeometry args={[0.2, 0.2, 2, 8]} />
+                <meshStandardMaterial color="#5d4037" />
+            </mesh>
+            <mesh position={[1.8, 0.2, 1.5]} rotation={[0, 0, Math.PI/2]}>
+                <cylinderGeometry args={[0.2, 0.2, 2, 8]} />
+                <meshStandardMaterial color="#5d4037" />
+            </mesh>
+        </group>
+      ) : isStable ? (
+        <group>
+            {/* Wider structure */}
+            <mesh position={[0, 1.0, 0]} castShadow receiveShadow>
+                <boxGeometry args={[4, 2, 3]} />
+                <meshStandardMaterial color="#574835" />
+            </mesh>
+            {/* Roof */}
+            <mesh position={[0, 2.5, 0]} castShadow>
+                <coneGeometry args={[3.5, 1.5, 4]} rotation={[0, Math.PI/4, 0]} />
+                <meshStandardMaterial color="#d4b996" />
+            </mesh>
+            <mesh position={[0, 0.5, 1.6]}>
+                <boxGeometry args={[3, 1, 0.2]} />
+                <meshStandardMaterial color="#3e2723" />
+            </mesh>
+        </group>
+      ) : isTemple ? (
+        <group>
+             {/* Cylinder base */}
+             <mesh position={[0, 1.5, 0]} castShadow receiveShadow>
+                <cylinderGeometry args={[2, 2.2, 3, 8]} />
+                <meshStandardMaterial color="#e5e7eb" />
+             </mesh>
+             {/* Dome */}
+             <mesh position={[0, 3, 0]} castShadow>
+                <sphereGeometry args={[2, 16, 8, 0, Math.PI * 2, 0, Math.PI/2]} />
+                <meshStandardMaterial color="#fcd34d" metalness={0.3} roughness={0.2} />
+             </mesh>
+             <pointLight position={[0, 4, 0]} color="gold" intensity={0.5} distance={5} />
+        </group>
+      ) : isWall ? (
+        <group>
+            <mesh position={[0, 1.25, 0]} castShadow receiveShadow>
+                <boxGeometry args={[2, 2.5, 0.5]} />
+                <meshStandardMaterial color="#57534e" roughness={0.9} />
             </mesh>
         </group>
       ) : (
